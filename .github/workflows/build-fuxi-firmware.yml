@@ -1,0 +1,120 @@
+# Build the fuxi (Xiaomi 13) UEFI firmware volume on a hosted Linux runner.
+#
+# Target location in the fork: .github/workflows/build-fuxi-firmware.yml
+# Device description expected at: devices/fuxi/  (board.toml, configs/, uefi-config/)
+#
+# What this produces: SILICIUM_UEFI.fd, the firmware volume that bootimg needs.
+# It does not build a kernel, a payload or a userdata image.
+#
+# Known constraints baked into the steps below:
+#   * fuxi.dsc pulls KailuaPkg through PACKAGES_PATH ({uefi}/Silicon/Qualcomm), so
+#     the uefi checkout must include that tree, not just Platforms/Xiaomi.
+#   * The upstream Resources/Configs/fuxi.toml carries sheng's FD addresses. The
+#     corrected file from devices/fuxi/uefi-config/ is copied over it before the
+#     build, and the step fails loudly if the copy did not land.
+#   * EDK II needs the Mu pip requirements; without them the build stops on an
+#     import error that looks unrelated to the packaging.
+#   * The firmware volume must be exactly 0x400000 bytes; the FDF gets FD_BASE /
+#     FD_SIZE / FD_BLOCKS from the device description.
+
+name: build fuxi firmware
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'devices/fuxi/**'
+      - '.github/workflows/build-fuxi-firmware.yml'
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout UniXNU fork with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout uefi-fuxi (fuxi branch)
+        uses: actions/checkout@v4
+        with:
+          repository: hanzi123-bilp/uefi-fuxi
+          ref: fuxi
+          path: uefi-fuxi
+          submodules: recursive
+
+      - name: Verify the trees the DSC needs
+        run: |
+          set -e
+          test -f uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
+          test -f uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+          test -d uefi-fuxi/Silicon/Qualcomm/KailuaPkg
+          test -f uefi-fuxi/Silicon/Qualcomm/KailuaPkg/KailuaPkg.dsc.inc
+          test -d uefi-fuxi/Mu_Basecore
+          echo "fuxi.dsc includes:"
+          grep -n 'KailuaPkg' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
+          echo "FDF memory layout:"
+          grep -n 'FD_BASE\|FD_SIZE\|FD_BLOCKS' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+
+      - name: Apply the corrected device config
+        run: |
+          set -e
+          cp devices/fuxi/uefi-config/fuxi.toml uefi-fuxi/Resources/Configs/fuxi.toml
+          echo "applied FD window:"
+          grep -E '^(base|size|header_version)' uefi-fuxi/Resources/Configs/fuxi.toml
+          grep -q '0xA7000000' uefi-fuxi/Resources/Configs/fuxi.toml
+          grep -q '0x400000' uefi-fuxi/Resources/Configs/fuxi.toml
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld make python3 python3-pip device-tree-compiler
+          clang --version | head -1
+          ld.lld --version | head -1
+
+      - name: Install Mu pip requirements
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r uefi-fuxi/pip-requirements.txt
+
+      - name: defconfig
+        run: python3 ./unixnu defconfig fuxi_defconfig -D devices/fuxi
+
+      - name: fetch sources
+        run: python3 ./unixnu fetch
+
+      - name: build firmware
+        run: |
+          python3 ./unixnu build firmware \
+            --uefi uefi-fuxi \
+            --edk2 uefi-fuxi/Mu_Basecore \
+            --skip-preflight 2>&1 | tee firmware-build.log
+
+      - name: Check the firmware volume size
+        if: always()
+        run: |
+          fv=$(find uefi-fuxi/Build/fuxiPkg -path '*/FV/SILICIUM_UEFI.fd' | head -1)
+          if [ -n "$fv" ]; then
+            size=$(stat -c %s "$fv")
+            echo "firmware volume: $fv ($size bytes)"
+            echo "expected: 4194304 bytes (0x400000)"
+            test "$size" -eq 4194304
+          else
+            echo "no firmware volume produced"
+            ls -R uefi-fuxi/Build 2>/dev/null | head -40 || true
+            exit 1
+          fi
+
+      - name: Upload firmware and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuxi-firmware-${{ github.run_id }}
+          path: |
+            uefi-fuxi/Build/fuxiPkg/**/FV/*.fd
+            firmware-build.log
+            out/fuxi/logs/**
+          if-no-files-found: warn
