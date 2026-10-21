@@ -20,7 +20,16 @@ jobs:
       - name: Build XNU 4K baseline
         env:
           JOBS: 3
-        run: bash scripts/build-xnu-4k-baseline.sh
+        run: |
+          set -o pipefail
+          bash scripts/build-xnu-4k-baseline.sh 2>&1 | tee build.log
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: xnu-baseline-arm64
