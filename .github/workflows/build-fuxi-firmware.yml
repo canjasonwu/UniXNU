@@ -67,6 +67,30 @@ jobs:
           grep -q '0xA7000000' uefi-fuxi/Resources/Configs/fuxi.toml
           grep -q '0x400000' uefi-fuxi/Resources/Configs/fuxi.toml
 
+      - name: Fix the fuxi FD rows to match uefiplatLA.cfg
+        run: |
+          # MemoryMapLib still describes sheng's layout (FD at 0xA7100000, 3 MiB).
+          # This device's own uefiplatLA.cfg says 0xA7000000, 0x00400000. SEC maps
+          # memory from this table, so a mismatch between the described FD window
+          # and the real one breaks the FVMAIN_COMPACT decompression
+          # ("Decompress Failed - Invalid Parameter" on the panel).
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c")
+          t = p.read_text(encoding="utf-8")
+          before = t
+          # drop the invented 1 MiB "FD Reserved" row
+          t = re.sub(r'[ \t]*\{"FD Reserved".*?\},\r?\n', '', t)
+          # point the FD row at the real window: 0xA7000000, 4 MiB
+          t = re.sub(r'("UEFI FD",\s*)0xA7100000,\s*0x00300000', r'\g<1>0xA7000000, 0x00400000', t)
+          if t == before:
+              sys.exit("MemoryMapLib patch did not change anything")
+          p.write_text(t, encoding="utf-8")
+          print("patched", p)
+          PY
+          grep -n 'UEFI FD' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c
+
       - name: Install host tools
         run: |
           sudo apt-get update
