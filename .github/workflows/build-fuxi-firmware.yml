@@ -121,6 +121,28 @@ jobs:
           PY
           grep -n 'PRB' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
+      - name: Instrument the LZMA decoder result
+        run: |
+          # One extra line: LZR res=<SRes> st=<ELzmaStatus> dlen=<dest> elen=<src>
+          #   SZ_OK=0  SZ_ERROR_DATA=1  SZ_ERROR_MEM=2  SZ_ERROR_CRC=3  SZ_ERROR_UNSUPPORTED=4  SZ_ERROR_PARAM=5
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = "  if (LzmaResult == SZ_OK) {"
+          if anchor not in t:
+              sys.exit("anchor not found in LzmaDecompress.c")
+          probe = (
+            '  DEBUG ((DEBUG_ERROR, "LZR res=%d st=%d dlen=%x elen=%x\\n",\n'
+            '    (UINTN)LzmaResult, (UINTN)Status, (UINTN)DecodedBufSize, (UINTN)EncodedDataSize));\n'
+          )
+          t = t.replace(anchor, probe + anchor, 1)
+          p.write_text(t, encoding="utf-8")
+          print("instrumented", p)
+          PY
+          grep -n 'LZR' uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c
+
       - name: Install host tools
         run: |
           sudo apt-get update
