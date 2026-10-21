@@ -112,6 +112,19 @@ jobs:
             --edk2 uefi-fuxi/Mu_Basecore \
             --skip-preflight 2>&1 | tee firmware-build.log
 
+      - name: make boot image
+        run: |
+          # v3 header: android boot image v3 carries no load addresses. unixnu
+          # bootimg only verifies a v0 header, so the image is built here with the
+          # uefi checkout's own mkbootimg.py instead.
+          set -o pipefail
+          mkdir -p out/fuxi/boot
+          python3 devices/fuxi/make-bootimg.py \
+            --uefi uefi-fuxi \
+            --dtb devices/fuxi/fuxi-live.dtb \
+            --output out/fuxi/boot/boot.img 2>&1 | tee bootimg.log
+          ls -l out/fuxi/boot/boot.img
+
       - name: Check the firmware volume size
         if: always()
         run: |
@@ -134,6 +147,9 @@ jobs:
           name: fuxi-firmware-${{ github.run_id }}
           path: |
             uefi-fuxi/Build/fuxiPkg/**/FV/*.fd
+            out/fuxi/boot/boot.img
+            out/fuxi/boot/boot.kernel
+            bootimg.log
             firmware-build.log
             out/fuxi/logs/**
           if-no-files-found: warn
