@@ -1,0 +1,67 @@
+# Kernel configuration of the fuxi image.
+# CONFIG_XNU_<NAME> becomes XNU_<NAME> for the kernel build.
+#
+# STATUS: draft. Derived from UniXNU-sheng configs/sheng_defconfig. The generic
+# switches are kept; every SHENG-only switch is removed rather than renamed,
+# because there is no fuxi implementation behind it yet.
+#
+# A flag here selects code that must already exist in the tree. Turning a flag on
+# without that code produces a link error, not a feature.
+
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_NATIVE_UFS=y
+CONFIG_XNU_NATIVE_AES=y
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK=y
+CONFIG_XNU_NATIVE_RAM_BLOCK=y
+CONFIG_XNU_TRUST_CACHE_RUNTIME=y
+CONFIG_XNU_SOURCE_MOCKFS=y
+CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
+CONFIG_XNU_VERIFIED_ROOT_PROBE=y
+CONFIG_XNU_OWNER_ROOT_AUDIT=y
+CONFIG_XNU_OWNER_ROOT_TRUST=y
+CONFIG_XNU_OWNER_CACHE_MOUNT=y
+CONFIG_XNU_OWNER_CACHE_STARTUP=y
+CONFIG_XNU_OWNER_BOOT_MANIFEST=y
+CONFIG_XNU_OWNER_DATA_MOUNT=y
+CONFIG_XNU_OWNER_UNION_SYSTEMOS=y
+CONFIG_XNU_DT_PANIC_REGION=y
+CONFIG_XNU_ZONE_PGZ_ALIGNMENT_PROBE=y
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+CONFIG_XNU_BOOT_PROGRESS=y
+
+# Removed from the sheng config, each for a stated reason:
+#
+#   CONFIG_XNU_SHENG_PMGR=y
+#     No fuxi platform-power implementation exists. The kernel has no PMGR path
+#     for this board, and the sheng one is keyed to the tablet's power domains.
+#     TODO: port build-sheng-platform-power.py, then add CONFIG_XNU_FUXI_PMGR and
+#     the matching code.
+#
+#   CONFIG_XNU_NATIVE_PAN=y
+#     Panel backlight / power sequencing. The fuxi panel is
+#     qcom,mdss_dsi_m3_38_0c_0a_dsc_cmd (from /proc/cmdline), not the sheng panel.
+#     TODO: needs a fuxi panel sequence.
+#
+#   CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y
+#   CONFIG_XNU_NATIVE_ADRENO=y
+#     Kept out of the first pass on purpose: bring-up order is firmware, then a
+#     kernel that reaches the console, then display, then GPU. Enabling these
+#     before the kernel reaches the console only hides the earlier failure.
+#     TODO: re-enable once the kernel boots to console. Adreno 740 is the same part
+#     as on sheng, so NativeAdreno is the most likely reusable driver on this board.
+
+# TODO CONFIG_XNU_OWNER_DATA_VOLUME_UUID
+#   The scratch Data volume UUID. This value must equal the UUID written into the
+#   userdata manifest when build userdata runs, so pick one value and keep it.
+#   sheng uses 18AB5557-DC2D-469B-8758-855E60F5B0DF. Not copied: a distinct value
+#   makes an accidental cross-device mount impossible.
+
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a"
+CONFIG_XNU_VERIFIED_ROOT_ARCHIVE="{tree}/build/verified-root-os-xnu-bundle/libVerifiedRootProbe.a"
+CONFIG_XNU_EXTRA_LD_ARCHIVES=""
+CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
+CONFIG_XNU_ARMVIRT_PLATFORM=n
