@@ -1,38 +1,49 @@
-name: build-xnu-baseline
+name: build-sheng-kernel
 on:
   workflow_dispatch:
 
 jobs:
-  xnu:
+  kernel:
     runs-on: macos-15
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Checkout device repository
+        run: git clone --depth 1 --recurse-submodules https://github.com/UniXNU/UniXNU-sheng.git ../sheng
       - name: Show toolchain
         run: |
           sw_vers
           xcodebuild -version
           python3 --version
       - name: Install host tools
-        run: brew install unifdef
-      - name: Build XNU 4K baseline
+        run: brew install unifdef llvm lld
+      - name: Select configuration
+        run: python3 ./unixnu defconfig sheng_defconfig -D ../sheng
+      - name: Fetch sources
+        run: python3 ./unixnu fetch -D ../sheng
+      - name: Fetch IPSW components
+        run: python3 ./unixnu ipsw fetch -D ../sheng
+      - name: Build kernel and prelink
         env:
           JOBS: 3
-        run: |
-          set -o pipefail
-          bash scripts/build-xnu-4k-baseline.sh 2>&1 | tee build.log
-      - name: Upload build log
+        run: python3 ./unixnu build kernel -D ../sheng -j 3
+      - name: Upload kernel
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: build.log
+          name: sheng-kernel
+          path: |
+            out/sheng/kernel/kernel.macho
+            out/sheng/kernel/kernel.json
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+          retention-days: 14
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: xnu-baseline-arm64
-          path: build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837*
-          if-no-files-found: error
+          name: sheng-logs
+          path: out/sheng/logs/*.log
+          if-no-files-found: warn
           retention-days: 14
