@@ -1,0 +1,282 @@
+# Board description of the Xiaomi 13 (fuxi, SM8550), read by the unixnu build driver.
+#
+# STATUS: draft, not a working board. Every value is either measured on this phone
+# on 2026-10-21 or copied from UniXNU-sheng because it is device independent.
+# Anything that could not be measured is marked TODO together with the command
+# that produces it. Raw evidence is in probe-out4/ (probe-fuxi.ps1 -Root).
+#
+# Read "WHAT THIS FILE UNLOCKS" at the bottom before trying a build.
+
+[board]
+name = "fuxi"
+soc = "SM8550"
+description = "Xiaomi 13"
+kit = "fuxi"
+
+# Device independent: this identifies the target OS image, not the hardware.
+# Copied verbatim from UniXNU-sheng. The identity is spoofed, so it does not have
+# to match the phone; it has to match the IPSW.
+[ipsw]
+url = "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
+product = "iPad7,1"
+version = "17.7.11"
+build = "21H461"
+device_class = "j120ap"
+chip_id = 0x8011
+board_id = 12
+fetch = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1,SystemTrustCache"]
+
+[ipsw.sha256]
+"044-76040-038.dmg" = "3f99b859c9728379110b66657c7b15285bcb1925ad8b5726542e2cdcf8b1028d"
+"044-76034-038.dmg" = "b4908cde41d23e6bc05e6af51a2c9eeb00cf0f863a6a18b1600c96a3fd70414f"
+
+# MEASURED 2026-10-21 on this phone, LUN 0 (sda32):
+#   /sys/block/sda/sda32/start              = 24887808  (512-byte units)
+#   /sys/block/sda/sda32/size               = 469917144 (512-byte units)
+#   /sys/block/sda/queue/logical_block_size = 4096
+#   24887808 / 8 = 3110976 = 0x2f7840
+#   469917144 / 8 = 58739643 LBA, so last = 0x2f7840 + 58739643 - 1 = 0x3afc3fa
+#   capacity = 224.1 GiB
+#
+# Do NOT substitute the sheng values (0x2f3840 / 0x3d0abfa). They start 16384 LBA
+# = 64 MiB earlier and are 8 GiB larger. A raw UFS driver using them would write
+# into the super partition.
+[userdata]
+first_lba = 0x2f7840
+last_lba = 0x3afc3fa
+lba_bytes = 4096
+windows = [
+  { name = "OS", component = "OS" },
+  { name = "SystemOS", component = "Cryptex1,SystemOS" },
+]
+
+[kernel]
+defconfig = "fuxi_defconfig"
+# Archive builders of the kernel step, in order. Only builders that exist in the
+# UniXNU base repository are active: a missing script aborts the step. The five
+# builders that live only in the sheng device repository are listed as TODOs below
+# rather than silently referenced.
+archives = [
+  "build-corecrypto-14.py",
+  "build-corecrypto-14.py --namespace",
+  "build-native-aes-bindings.py",
+  "build-native-virtio-bindings.py --component NativeRamBlock --directory build/native-ram-block",
+  "build-native-virtio-bindings.py --component NativeVirtioBlock",
+  "build-mockfs-fixture.py",
+  "build-libpthread-kernel.py",
+  "build-native-adreno-accelerator.py",
+  # TODO build-arm-driver.py
+  #   Generic wrapper that builds a lib<driver>.a from drivers/<name>. It lives in
+  #   UniXNU-sheng. Copy it verbatim; it is not sheng specific. Without it these
+  #   archives are missing: ArmDTPlatform, ArmCpu, NativeAES, NativeUfs,
+  #   NativeVirtioBlock, NativeRamBlock.
+  # TODO build-fuxi-platform-power.py
+  #   sheng counterpart: build-sheng-platform-power.py (SM8550 PMGR). Same SoC, so
+  #   it is the right starting point, but the power domains the panel and the GPU
+  #   need are board specific.
+  # TODO build-boot-progress.py          (sheng repository only)
+  # TODO build-native-adreno-kits.py     (sheng repository only)
+  # TODO build-native-legacy-display.py  (sheng repository only)
+]
+
+# Device independent: all of this describes the iPadOS kernelcache, which is the
+# same file for every board that uses the [ipsw] above. Copied verbatim.
+[kernel.prelink]
+tool = "kits/NativePrelink/emit_prelink.py"
+kernel = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
+kernelcache_sha256 = "f18b4df865405f2a287b84977d7aca745e056d656d9fc9df1662970ce2969de7"
+slide = "-0x1000000"
+early_security_init = "com.apple.driver.AppleMobileFileIntegrity=0xfffffff005ab4ae0"
+roots = [
+  "com.apple.AppleFSCompression.AppleFSCompressionTypeZlib",
+  "com.apple.driver.AppleARMPlatform",
+  "com.apple.driver.AppleARMWatchdogTimer",
+  "com.apple.driver.AppleAudioClockLibs",
+  "com.apple.driver.AppleEffaceableStorage",
+  "com.apple.driver.AppleIISController",
+  "com.apple.driver.AppleM2ScalerCSCDriver",
+  "com.apple.driver.AppleMobileFileIntegrity",
+  "com.apple.driver.ApplePMGR",
+  "com.apple.driver.IODARTFamily",
+  "com.apple.filesystems.apfs",
+  "com.apple.iokit.CoreAnalyticsFamily",
+  "com.apple.iokit.IOAVFamily",
+  "com.apple.iokit.IOAudio2Family",
+  "com.apple.iokit.IOCECFamily",
+  "com.apple.iokit.IOCryptoAcceleratorFamily",
+  "com.apple.iokit.IOGPUFamily",
+  "com.apple.iokit.IOHDCPFamily",
+  "com.apple.iokit.IOMobileGraphicsFamily",
+  "com.apple.iokit.IOReportFamily",
+  "com.apple.iokit.IOSlowAdaptiveClockingFamily",
+  "com.apple.iokit.IOStorageFamily",
+  "com.apple.iokit.IOSurface",
+  "com.apple.kec.Libm",
+  "com.apple.kec.corecrypto",
+  "com.apple.kext.AppleMatch",
+  "com.apple.kext.CoreTrust",
+  "com.apple.security.AppleImage4",
+  "com.apple.security.sandbox",
+  "com.apple.iokit.IOHIDFamily",
+  "com.apple.iokit.IOHIDEventDriver",
+]
+
+# This block is the whole reason the firmware step can be tried at all.
+# config, dsc and fd must line up with Platforms/Xiaomi/fuxiPkg in the --uefi
+# checkout (hanzi123-bilp/uefi-fuxi, branch fuxi).
+#
+# The UEFI FD window is 0xA7000000 / 0x400000, confirmed on 2026-10-21 from the
+# device's own uefiplatLA.cfg inside xbl_config_a, not inferred. The upstream
+# Resources/Configs/fuxi.toml carries sheng's 0xA7100000 / 0x300000 instead; the
+# corrected file is uefi-config/fuxi.toml in this directory.
+#
+# The same table confirms 0xA760D000 / 0x40000 as "UEFI Stack", which is what
+# fuxi.dsc already uses for PcdCPUCoresStackBase, and 0xB8000000 / 0x2B00000 as
+# "Display Reserved", which is the splash_region in the device tree.
+[firmware]
+config = "fuxi"
+dsc = "Platforms/Xiaomi/fuxiPkg/fuxi.dsc"
+fd = "Build/fuxiPkg/{target}_CLANGPDB/FV/SILICIUM_UEFI.fd"
+# TODO scripts/check-fuxi.py
+#   sheng has scripts/check-sheng.py as a board preflight. Leave this empty and
+#   pass --skip-preflight until a fuxi preflight exists.
+preflight = []
+submodules = ["Common/Mu", "Common/Mu_OEM_Sample", "Silicium-ACPI", "Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl"]
+patches = ["Resources/MuPatches/Gic-Spurious.patch"]
+packages = [
+  "{uefi}",
+  "{uefi}/Platforms/Xiaomi",
+  "{tree}/package",
+  "{tree}/drivers/DarwinBoot",
+  "{edk2}",
+  "{uefi}/Common/Mu",
+  "{uefi}/Common/Mu_OEM_Sample",
+  "{uefi}/Silicon/Qualcomm",
+  "{uefi}/Silicon/Silicium",
+  "{uefi}/Silicium-ACPI",
+  "{uefi}/Silicium-ACPI/Platforms/Xiaomi",
+  "{uefi}/Silicium-ACPI/Silicon/Qualcomm",
+]
+
+[firmware.defines]
+ENABLE_SECUREBOOT = "1"
+DEVICE_MODEL = "fuxi"
+MEMORY_PROTECTION = "TRUE"
+SHIP_MODE = "FALSE"
+BUILDID_STRING = "fuxi-research"
+
+# The ramdisk of the boot image. Everything here needs the kernel, so it is only
+# reachable after [kernel] is fixed.
+[payload]
+volume = "FUXIESP"
+size_mib = 192
+loader = "firmware"
+title = "fuxi first boot: source 4K XNU to console"
+panic_screen = true
+skip_setup_tool = "scripts/seed-data-skip-setup.py"
+# MEASURED from the live device tree (fuxi-live.dtb, /sys/firmware/fdt).
+# dram_size is the low DRAM window, not the total. /memory starts at 0x80000000 and
+# the last range below the 4 GiB boundary ends exactly at 0x100000000
+# (0xe7cb0000 + 0x18350000), so the low window is 0x80000000 bytes = 2 GiB.
+# The full tree describes 9 memory ranges totalling 12543721472 bytes = 11.68 GiB;
+# the high ranges sit at 0x880000000 / 0x8c0000000 / 0x980000000.
+dram_size = "0x80000000"
+#
+# TODO trust_cache_sha256: two accepted bundle hashes. Copied from sheng because
+#   both bundles are built from the same IPSW, so they are expected to match, but
+#   that is an expectation, not a measurement.
+trust_cache_sha256 = [
+  "7416ca4f8377146626bb284e2133c76bee6cb4e3ee0af5d648b186235a7323a7",
+  "8900d6a93d7a59ce1a872a5c081e559f4240a218f97e12d44d22dda46644d68f",
+]
+# Kernel arguments: the generic ones are kept, every sheng-* switch is dropped
+# because no fuxi equivalent exists yet.
+kernel_args = [
+  "-v",
+  "serial=3",
+  "debug=0x14e",
+  "kt_fixed_zones=120",
+  "boot-progress=2",
+  "-apfs_shared_datavolume",
+  "native-ufs-root=1",
+  "armcpu-diagnostics=1",
+  "-no_slto_panic",
+]
+# Dropped on purpose, each needs a fuxi implementation first:
+#   sheng-pmgr=2, sheng-touch=4, sheng-gpu-*, sheng-smp, sheng-cpufreq,
+#   offline-* (the whole offline bring-up ladder), boot-ui-focus*,
+#   sheng-disable-jobs, sheng-data-persist
+
+[payload.adt]
+tool = "scripts/make-fuxi-adt.py"     # TODO does not exist yet
+chip_id = "207"                       # same SoC family as sheng; unverified here
+# 4.75 GiB, kept from sheng on purpose. This is how much DRAM the owner image is
+# told it has; a window smaller than the real 11.68 GiB is the safe choice during
+# bring-up. Raise it only after the kernel maps the high ranges without faults.
+owned_memory_size = "0x130000000"
+root_match_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"   # from the IPSW, not the board
+cpu_regs = "0,0x100,0x200,0x300,0x400,0x500,0x600,0x700"          # 8 cores
+packed_data_ramdisk = true
+ipad_identity = true
+unique_chip_id = "required"           # platform seed, deliberately not in any repo
+
+# No [[bootimg.dtb_node]] block here.
+# sheng injects /reserved-memory/splash_region because its device tree lacks the
+# node and the stock ABL then powers the panel off. fuxi already has it, measured
+# in the live FDT: label "cont_splash_region", reg = <0x0 0xb8000000 0x0 0x2b00000>,
+# i.e. base 0xb8000000, size 0x2b00000 (43 MiB). fdtput -c would try to create an
+# existing node and fail, so nothing is injected. Revisit only if the panel stays
+# dark after the firmware runs.
+
+# ---------------------------------------------------------------------------
+# BOOT IMAGE DEVICE TREE
+#
+# The boot image device tree is not a board.toml field: unixnu bootimg takes it as
+# --dtb. The file for this board is fuxi-live.dtb in this directory.
+#   source : /sys/firmware/fdt on the device (root). This is the FDT the stock ABL
+#            actually handed to the kernel, not a tree rebuilt from kernel sources.
+#   size   : 815057 bytes
+#   sha256 : aa4310cf3359b109150e364dc17eb599728d0760a62024f687a6973d78956fef
+#   header : magic 0xd00dfeed, version 17, totalsize 815057  (validated)
+#   nodes  : 4240, of which 65 are reserved-memory children
+# bootimg.py re-checks magic and totalsize against the file length, so this file
+# passes its guard. read-fdt.py in this directory reproduces the extraction.
+#
+# The panel init sequence is in the tree, at
+#   /soc/qcom,mdss_mdp@ae00000/qcom,mdss_dsi_m3_38_0c_0a_dsc_cmd
+# with three timings under .../qcom,mdss-dsi-display-timings/. That node, not the
+# fuxi.dsc comment, is the source for a future fuxi panel driver.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# WHAT THIS FILE UNLOCKS
+#
+#   unixnu defconfig   works: it only copies configs/fuxi_defconfig
+#   unixnu fetch       works: module resolution is board independent
+#   unixnu build package   likely works: the EDK II package is board independent
+#   unixnu build firmware  THIS IS THE POINT of this file. It needs [firmware]
+#                      only, and that block is complete. Success means a
+#                      SILICIUM_UEFI.fd exists.
+#   unixnu bootimg --ramdisk none   needs [firmware] plus a device tree. Both are
+#                      now available: fuxi-live.dtb validates, and [firmware] is
+#                      complete. This step is blocked only on the firmware volume.
+#
+# WHAT IT DOES NOT UNLOCK
+#
+#   unixnu build kernel   blocked. Five archive builders do not exist, the
+#                         defconfig has no fuxi driver behind it, and there is no
+#                         fuxi platform-power implementation.
+#   build payload         blocked. Needs make-fuxi-adt.py, the trust cache bundle
+#                         and the platform seed.
+#   build userdata        blocked. Needs macOS (hdiutil) and an IPSW download.
+#
+# THE NEXT MISSING INPUT, IN ORDER
+#
+#   1. The five archive builders.
+#   2. make-fuxi-adt.py.
+#
+# CLOSED SO FAR
+#   fuxi .dtb          pulled from /sys/firmware/fdt, validates, see above
+#   dram_size          derived from the device tree memory map
+#   uefi_fd base/size  read from uefiplatLA.cfg, see the [firmware] note
+# ---------------------------------------------------------------------------
