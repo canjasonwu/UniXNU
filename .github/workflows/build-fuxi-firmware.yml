@@ -166,30 +166,27 @@ jobs:
           PY
           grep -n 'ADR' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
-      - name: Reserve the undescribed window below 0xD8800000
+      - name: Store the inner FV with EFI standard compression
         run: |
-          # The map stops at 0xBBCC0000 and resumes at 0xD8800000, yet SEC handed
-          # the 5.4 MiB decompression buffer out at 0xC776BFFC, inside that gap.
-          # Describing the gap as reserved is the experiment: if the allocator
-          # respects this table, dst must move into DXE Heap (0xBAB00000) and the
-          # LZMA history it reads back becomes real memory. If dst stays at 0xC7..,
-          # the allocator is not using this table at all and this route is dead.
+          # LZMA cannot be decoded by this Mu tree (SZ_ERROR_DATA) even though the
+          # stream is valid. Replace the GUIDed LZMA wrapper with a plain
+          # EFI_SECTION_COMPRESSION: SEC already handles that through
+          # UefiDecompress, so no extra library or constructor is needed.
           python3 - <<'PY'
-          import sys
+          import re, sys
           from pathlib import Path
-          p = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c")
+          p = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
           t = p.read_text(encoding="utf-8")
-          key = '"DXE Heap"'
-          i = t.find(key)
-          if i < 0:
-              sys.exit("DXE Heap entry not found")
-          eol = t.find("\n", i)
-          row = '  {"LOW RESERVED",      0xBBCC0000, 0x1CB40000, AddMem,   MEM_RES, SYS_MEM_CAP, Reserv, WRITE_BACK_XN},\n'
-          t = t[:eol + 1] + row + t[eol + 1:]
-          p.write_text(t, encoding="utf-8")
-          print("inserted LOW RESERVED row")
+          pat = re.compile(
+              r'SECTION GUIDED [0-9A-Fa-f\-]+ PROCESSING_REQUIRED = TRUE \{\s*'
+              r'SECTION FV_IMAGE = FVMAIN\s*\}', re.S)
+          t2, n = pat.subn('SECTION COMPRESSION {\n      SECTION FV_IMAGE = FVMAIN\n    }', t)
+          if n != 1:
+              sys.exit("expected one GUIDed wrapper, replaced %d" % n)
+          p.write_text(t2, encoding="utf-8")
+          print("switched the inner FV to EFI standard compression")
           PY
-          grep -c 'LOW RESERVED' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c
+          grep -n -A2 'FILE FV_IMAGE' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
 
       - name: Install host tools
         run: |
