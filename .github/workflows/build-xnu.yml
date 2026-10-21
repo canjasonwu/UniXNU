@@ -25,6 +25,18 @@ jobs:
         run: python3 ./unixnu fetch -D ../sheng
       - name: Fetch IPSW components
         run: python3 ./unixnu ipsw fetch -D ../sheng
+      - name: Seed Apple header index caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ./unixnu tree -D ../sheng
+          mkdir -p out/sheng/tree/.cache/sources
+          cd out/sheng/tree/.cache/sources
+          base=https://api.github.com/repos/apple-oss-distributions/xnu/contents
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$base/iokit/DriverKit?ref=xnu-10063.121.3" -o xnu-driverkit-10063.121.3.json
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$base/iokit/DriverKit/crypto?ref=xnu-10063.121.3" -o xnu-driverkit-crypto-10063.121.3.json
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$base/EXTERNAL_HEADERS/TrustCache?ref=xnu-8796.101.5" -o xnu-trustcache-8796.101.5.json
+          ls -l
       - name: Build kernel and prelink
         env:
           JOBS: 3
