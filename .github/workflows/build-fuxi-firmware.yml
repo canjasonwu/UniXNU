@@ -166,6 +166,35 @@ jobs:
           PY
           grep -n 'ADR' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
+      - name: Instrument a checksum of the compressed stream in memory
+        run: |
+          # Everything else has been ruled out except "is the compressed data the
+          # decoder sees really the data we built". Four 32-bit words sampled from
+          # the payload, compared against the same offsets in the .fd offline.
+          # Match -> the copy is intact and the decoder is at fault.
+          # Differ -> the image or the mapping corrupts the FV and nothing else matters.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = "      ScratchBuffer = (VOID *)(UINTN)AllocatePages (EFI_SIZE_TO_PAGES (ScratchBufferSize));"
+          if anchor not in t:
+              sys.exit("anchor not found")
+          d = "((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset"
+          probe = (
+            '      DEBUG ((DEBUG_ERROR, "CHK %x %x %x %x\\n",\n'
+            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0x1000),\n'
+            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0x40000),\n'
+            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0x80000),\n'
+            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0xC0000)));\n'
+          )
+          t = t.replace(anchor, probe + anchor, 1)
+          p.write_text(t, encoding="utf-8")
+          print("checksum probe inserted")
+          PY
+          grep -n 'CHK' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
+
       - name: Raise the LZMA scratch budget above the dictionary size
         run: |
           # SCRATCH_BUFFER_REQUEST_SIZE is a hard 64 KiB and SzAlloc is a bump
