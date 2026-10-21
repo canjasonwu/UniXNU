@@ -1,0 +1,156 @@
+# Build the fuxi firmware with the inner FV stored uncompressed.
+#
+# Purpose: bypass the LZMA guided section entirely. On the device, SEC fails in
+# ExtractGuidedSectionDecode with EFI_INVALID_PARAMETER while decompressing
+# FVMAIN_COMPACT, so this variant stores FVMAIN as a plain FV_IMAGE section.
+# The FD window is fixed at 4 MiB, so the inner FV has to fit: the DEBUG build
+# (5.4 MiB) does not, which is why this workflow builds RELEASE.
+#
+# Target location in the fork: .github/workflows/build-fuxi-uncompressed.yml
+
+name: build fuxi firmware uncompressed
+
+on:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout UniXNU fork with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout uefi-fuxi (fuxi branch)
+        uses: actions/checkout@v4
+        with:
+          repository: hanzi123-bilp/uefi-fuxi
+          ref: fuxi
+          path: uefi-fuxi
+          submodules: recursive
+
+      - name: Verify the trees the DSC needs
+        run: |
+          set -e
+          test -f uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
+          test -f uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+          test -d uefi-fuxi/Silicon/Qualcomm/KailuaPkg
+          test -f uefi-fuxi/Silicon/Qualcomm/KailuaPkg/KailuaPkg.dsc.inc
+          test -d uefi-fuxi/Mu_Basecore
+
+      - name: Apply the corrected device config
+        run: |
+          set -e
+          cp devices/fuxi/uefi-config/fuxi.toml uefi-fuxi/Resources/Configs/fuxi.toml
+          grep -q '0xA7000000' uefi-fuxi/Resources/Configs/fuxi.toml
+          grep -q '0x400000' uefi-fuxi/Resources/Configs/fuxi.toml
+
+      - name: Store the inner FV uncompressed
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
+          t = p.read_text(encoding="utf-8")
+          pat = re.compile(
+              r'SECTION GUIDED [0-9A-Fa-f\-]+ PROCESSING_REQUIRED = TRUE \{\s*'
+              r'SECTION FV_IMAGE = FVMAIN\s*\}', re.S)
+          t2, n = pat.subn('SECTION FV_IMAGE = FVMAIN', t)
+          if n != 1:
+              sys.exit("expected exactly one GUIDed wrapper, replaced %d" % n)
+          p.write_text(t2, encoding="utf-8")
+          print("removed the LZMA wrapper")
+          PY
+          grep -n -A3 'FILE FV_IMAGE' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+
+      - name: Fix the fuxi FD rows to match uefiplatLA.cfg
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c")
+          t = p.read_text(encoding="utf-8")
+          before = t
+          t = re.sub(r'[ \t]*\{"FD Reserved".*?\},\r?\n', '', t)
+          t = re.sub(r'("UEFI FD",\s*)0xA7100000,\s*0x00300000', r'\g<1>0xA7000000, 0x00400000', t)
+          if t == before:
+              sys.exit("MemoryMapLib patch did not change anything")
+          p.write_text(t, encoding="utf-8")
+          print("patched", p)
+          PY
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm make python3 python3-pip device-tree-compiler uuid-dev
+          test -f /usr/include/uuid/uuid.h
+          for v in /usr/lib/llvm-*/bin; do echo "$v" >> "$GITHUB_PATH"; done
+          for t in clang lld-link llvm-lib llvm-rc llvm-objcopy llvm-nm llvm-ar; do
+            if ! command -v "$t" >/dev/null 2>&1; then
+              cand=$(ls /usr/lib/llvm-*/bin/"$t" 2>/dev/null | head -1 || true)
+              if [ -n "$cand" ]; then sudo ln -sf "$cand" "/usr/local/bin/$t"; fi
+            fi
+          done
+          command -v clang && command -v lld-link && command -v llvm-lib && command -v llvm-rc
+
+      - name: Install Mu pip requirements
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r uefi-fuxi/pip-requirements.txt
+
+      - name: defconfig
+        run: python3 ./unixnu defconfig fuxi_defconfig -D devices/fuxi
+
+      - name: fetch sources
+        run: python3 ./unixnu fetch
+
+      - name: build firmware (RELEASE, uncompressed FV)
+        run: |
+          set -o pipefail
+          python3 ./unixnu build firmware \
+            --uefi uefi-fuxi \
+            --edk2 uefi-fuxi/Mu_Basecore \
+            --target RELEASE \
+            --skip-preflight 2>&1 | tee firmware-build.log
+
+      - name: make boot image
+        run: |
+          set -o pipefail
+          mkdir -p out/fuxi/boot-release
+          python3 devices/fuxi/make-bootimg.py \
+            --uefi uefi-fuxi \
+            --target RELEASE \
+            --dtb devices/fuxi/fuxi-live.dtb \
+            --output out/fuxi/boot-release/boot.img 2>&1 | tee bootimg.log
+          ls -l out/fuxi/boot-release/boot.img
+
+      - name: Check the firmware volume size
+        if: always()
+        run: |
+          fv=$(find uefi-fuxi/Build/fuxiPkg -path '*RELEASE*/FV/SILICIUM_UEFI.fd' | head -1)
+          if [ -n "$fv" ]; then
+            size=$(stat -c %s "$fv")
+            echo "firmware volume: $fv ($size bytes), expected 4194304"
+            test "$size" -eq 4194304
+          else
+            echo "no firmware volume produced"
+            ls -R uefi-fuxi/Build 2>/dev/null | head -40 || true
+            exit 1
+          fi
+
+      - name: Upload firmware and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuxi-firmware-uncompressed-${{ github.run_id }}
+          path: |
+            uefi-fuxi/Build/fuxiPkg/**/FV/*.fd
+            out/fuxi/boot-release/boot.img
+            bootimg.log
+            firmware-build.log
+            out/fuxi/logs/**
+          if-no-files-found: warn
