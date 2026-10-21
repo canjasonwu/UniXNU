@@ -1,0 +1,109 @@
+# Build the sheng (Xiaomi Pad 6S Pro) firmware with the same toolchain, purely to
+# compare one number against the fuxi build: the LZMA dictionary size stored in
+# FVMAIN_COMPACT. Nothing is flashed and no device is needed.
+#
+# Why: fuxi's SEC fails in LzmaDecode with SZ_ERROR_DATA while the stream decodes
+# fine with a standard decoder. sheng uses the same FDF structure, the same SEC and
+# the same LZMA guided section, and is documented to boot. If sheng's stream uses a
+# much smaller dictionary, the difference is the BaseTools compression parameter and
+# that is the fix. If it also says 16 MiB, the failure is environmental instead.
+#
+# Target location in the fork: .github/workflows/build-sheng-firmware.yml
+
+name: build sheng firmware (reference)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout UniXNU fork with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout UniXNU-sheng
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU-sheng
+          path: sheng-dev
+          submodules: recursive
+
+      - name: Checkout uefi-sheng
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/uefi-sheng
+          ref: sheng
+          path: uefi-sheng
+          submodules: recursive
+
+      - name: Verify the trees the DSC needs
+        run: |
+          set -e
+          test -f sheng-dev/board.toml
+          test -f sheng-dev/configs/sheng_defconfig
+          test -f uefi-sheng/Platforms/Xiaomi/shengPkg/sheng.dsc
+          test -f uefi-sheng/Platforms/Xiaomi/shengPkg/sheng.fdf
+          test -d uefi-sheng/Silicon/Qualcomm/KailuaPkg
+          test -d uefi-sheng/Mu_Basecore
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm make python3 python3-pip device-tree-compiler uuid-dev
+          test -f /usr/include/uuid/uuid.h
+          for v in /usr/lib/llvm-*/bin; do echo "$v" >> "$GITHUB_PATH"; done
+          for t in clang lld-link llvm-lib llvm-rc llvm-objcopy llvm-nm llvm-ar; do
+            if ! command -v "$t" >/dev/null 2>&1; then
+              cand=$(ls /usr/lib/llvm-*/bin/"$t" 2>/dev/null | head -1 || true)
+              if [ -n "$cand" ]; then sudo ln -sf "$cand" "/usr/local/bin/$t"; fi
+            fi
+          done
+          command -v clang && command -v lld-link && command -v llvm-lib && command -v llvm-rc
+
+      - name: Install Mu pip requirements
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r uefi-sheng/pip-requirements.txt
+
+      - name: defconfig
+        run: python3 ./unixnu defconfig sheng_defconfig -D sheng-dev
+
+      - name: fetch sources
+        run: python3 ./unixnu fetch
+
+      - name: build firmware
+        run: |
+          set -o pipefail
+          python3 ./unixnu build firmware \
+            --uefi uefi-sheng \
+            --edk2 uefi-sheng/Mu_Basecore \
+            --skip-preflight 2>&1 | tee firmware-build.log
+
+      - name: Check the firmware volume size
+        if: always()
+        run: |
+          fv=$(find uefi-sheng/Build/shengPkg -path '*/FV/SILICIUM_UEFI.fd' | head -1)
+          if [ -n "$fv" ]; then
+            size=$(stat -c %s "$fv")
+            echo "firmware volume: $fv ($size bytes), sheng expects 3145728 (0x300000)"
+          else
+            echo "no firmware volume produced"
+            ls -R uefi-sheng/Build 2>/dev/null | head -40 || true
+          fi
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-firmware-reference-${{ github.run_id }}
+          path: |
+            uefi-sheng/Build/shengPkg/**/FV/*.fd
+            firmware-build.log
+            out/sheng/logs/**
+          if-no-files-found: warn
