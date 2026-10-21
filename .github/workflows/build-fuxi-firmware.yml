@@ -166,27 +166,27 @@ jobs:
           PY
           grep -n 'ADR' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
-      - name: Store the inner FV with EFI standard compression
+      - name: Raise the LZMA scratch budget above the dictionary size
         run: |
-          # LZMA cannot be decoded by this Mu tree (SZ_ERROR_DATA) even though the
-          # stream is valid. Replace the GUIDed LZMA wrapper with a plain
-          # EFI_SECTION_COMPRESSION: SEC already handles that through
-          # UefiDecompress, so no extra library or constructor is needed.
+          # SCRATCH_BUFFER_REQUEST_SIZE is a hard 64 KiB and SzAlloc is a bump
+          # allocator over exactly that buffer. Our stream declares a 16 MiB
+          # dictionary, so any dictionary window the decoder asks for cannot fit
+          # and SzAlloc returns NULL (SZ_ERROR_MEM), which the callers then report
+          # as INVALID_PARAMETER. 17 MiB covers the dictionary plus the ~16 KiB of
+          # probability tables. PrePiLib allocates whatever GetInfo asks for.
           python3 - <<'PY'
-          import re, sys
+          import sys
           from pathlib import Path
-          p = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
+          p = Path("uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c")
           t = p.read_text(encoding="utf-8")
-          pat = re.compile(
-              r'SECTION GUIDED [0-9A-Fa-f\-]+ PROCESSING_REQUIRED = TRUE \{\s*'
-              r'SECTION FV_IMAGE = FVMAIN\s*\}', re.S)
-          t2, n = pat.subn('SECTION COMPRESSION {\n      SECTION FV_IMAGE = FVMAIN\n    }', t)
-          if n != 1:
-              sys.exit("expected one GUIDed wrapper, replaced %d" % n)
-          p.write_text(t2, encoding="utf-8")
-          print("switched the inner FV to EFI standard compression")
+          old = "#define SCRATCH_BUFFER_REQUEST_SIZE  SIZE_64KB"
+          if old not in t:
+              sys.exit("scratch size define not found")
+          t = t.replace(old, "#define SCRATCH_BUFFER_REQUEST_SIZE  (SIZE_1MB * 17)", 1)
+          p.write_text(t, encoding="utf-8")
+          print("scratch budget raised to 17 MiB")
           PY
-          grep -n -A2 'FILE FV_IMAGE' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+          grep -n 'SCRATCH_BUFFER_REQUEST_SIZE' uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c
 
       - name: Install host tools
         run: |
