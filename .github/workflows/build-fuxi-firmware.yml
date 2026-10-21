@@ -91,6 +91,36 @@ jobs:
           PY
           grep -n 'UEFI FD' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c
 
+      - name: Instrument PrePiLib FV decompression
+        run: |
+          # Two short DEBUG lines only, so the panel stays readable:
+          #   PRB  : destination size, scratch size, section type, DataOffset
+          #   PRB2 : first four bytes of the source the decoder is handed
+          # A correct run must show dst=52b008, type=2, dofs=18 and PRB2 5d 00 00 00.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = "      ScratchBuffer = (VOID *)(UINTN)AllocatePages (EFI_SIZE_TO_PAGES (ScratchBufferSize));"
+          if anchor not in t:
+              sys.exit("anchor not found in FwVol.c")
+          probe = (
+            '      DEBUG ((DEBUG_ERROR, "PRB dst=%x scr=%x type=%x dofs=%x\\n",'
+            ' (UINTN)DstBufferSize, (UINTN)ScratchBufferSize, (UINTN)Section->Type,'
+            ' (UINTN)((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset));\n'
+            '      DEBUG ((DEBUG_ERROR, "PRB2 %02x %02x %02x %02x\\n",\n'
+            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset),\n'
+            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset + 1),\n'
+            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset + 2),\n'
+            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset + 3)));\n'
+          )
+          t = t.replace(anchor, probe + anchor, 1)
+          p.write_text(t, encoding="utf-8")
+          print("instrumented", p)
+          PY
+          grep -n 'PRB' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
+
       - name: Install host tools
         run: |
           sudo apt-get update
