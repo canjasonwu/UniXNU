@@ -70,12 +70,27 @@ jobs:
       - name: Install host tools
         run: |
           sudo apt-get update
-          # uuid-dev is required by BaseTools GenFv/GenFw (uuid/uuid.h, -luuid).
+          # uuid-dev: BaseTools GenFv/GenFw need uuid/uuid.h and -luuid.
+          # llvm: EDK II's CLANGPDB toolchain needs llvm-lib and llvm-rc, which
+          #       the plain clang package does not pull in.
           sudo apt-get install -y --no-install-recommends \
-            clang lld make python3 python3-pip device-tree-compiler uuid-dev
-          clang --version | head -1
-          ld.lld --version | head -1
+            clang lld llvm make python3 python3-pip device-tree-compiler uuid-dev
           test -f /usr/include/uuid/uuid.h
+          # CLANGPDB looks for clang, lld-link, llvm-lib, llvm-rc under these
+          # exact names. Ubuntu ships some of them only in /usr/lib/llvm-N/bin,
+          # so link the unversioned names into /usr/local/bin.
+          for v in /usr/lib/llvm-*/bin; do echo "$v" >> "$GITHUB_PATH"; done
+          for t in clang lld-link llvm-lib llvm-rc llvm-objcopy llvm-nm llvm-ar; do
+            if ! command -v "$t" >/dev/null 2>&1; then
+              cand=$(ls /usr/lib/llvm-*/bin/"$t" 2>/dev/null | head -1 || true)
+              if [ -n "$cand" ]; then sudo ln -sf "$cand" "/usr/local/bin/$t"; fi
+            fi
+            printf '%-14s %s\n' "$t" "$(command -v "$t" || echo MISSING)"
+          done
+          command -v clang >/dev/null
+          command -v lld-link >/dev/null
+          command -v llvm-lib >/dev/null
+          command -v llvm-rc >/dev/null
 
       - name: Install Mu pip requirements
         run: |
