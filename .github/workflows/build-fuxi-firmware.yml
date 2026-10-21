@@ -143,6 +143,29 @@ jobs:
           PY
           grep -n 'LZR' uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c
 
+      - name: Instrument the buffer addresses
+        run: |
+          # Third line: ADR dst=<dest buffer> sec=<section> scr=<scratch>
+          # If [dst, dst+dlen) overlaps [sec+DataOffset, +981k) the decoder is
+          # writing over its own input, which shows up as SZ_ERROR_DATA halfway.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = "      DstBuffer = (UINT8 *)DstBuffer + EFI_PAGE_SIZE - SectionHeaderSize;"
+          if anchor not in t:
+              sys.exit("DstBuffer anchor not found")
+          probe = (
+            '      DEBUG ((DEBUG_ERROR, "ADR dst=%x sec=%x scr=%x\\n",\n'
+            '        (UINTN)DstBuffer, (UINTN)Section, (UINTN)ScratchBuffer));\n'
+          )
+          t = t.replace(anchor, anchor + "\n" + probe, 1)
+          p.write_text(t, encoding="utf-8")
+          print("instrumented", p)
+          PY
+          grep -n 'ADR' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
+
       - name: Install host tools
         run: |
           sudo apt-get update
