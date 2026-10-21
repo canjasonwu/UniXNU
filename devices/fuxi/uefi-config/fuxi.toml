@@ -1,0 +1,47 @@
+#
+# fuxi (Xiaomi 13, SM8550) - UEFI device config
+#
+# This file replaces Resources/Configs/fuxi.toml in hanzi123-bilp/uefi-fuxi
+# (branch fuxi). Only [uefi_fd] is corrected; the rest is unchanged.
+#
+# SOURCE OF THE CORRECTION
+#
+# The values below come from this phone's own uefiplatLA.cfg, read out of
+# /dev/block/by-name/xbl_config_a on 2026-10-21. The relevant row is:
+#
+#   0xA7000000, 0x00400000, "UEFI FD",  AddMem, SYS_MEM, SYS_MEM_CAP, BsData, WRITE_BACK
+#
+# The file being replaced had base = 0xA7100000 and size = 0x300000, which are
+# sheng's numbers, while its own comment said not to copy them. The comment was
+# right; the values were wrong. Full evidence: uefiplatLA-cfg.txt.
+#
+# The same table also settles two other addresses that fuxi.dsc marks as TODO:
+#
+#   0xA760D000, 0x00040000, "UEFI Stack"  -> PcdCPUCoresStackBase / PrimaryStackSize
+#   0x80000000, 0x01200000, "NOMAP"       -> PcdSystemMemoryBase
+#
+# fuxi.dsc already carries exactly 0xA760D000 and 0x40000, so that TODO is
+# resolved rather than wrong: those are the device's real values.
+#
+
+[boot_shim]
+requires_kernel_header = true
+
+[uefi_fd]
+# Must match the "UEFI FD" row of uefiplatLA.cfg byte for byte. bootimg.py asserts
+# that the built firmware volume length equals size, so the FDF has to produce a
+# 4 MiB FD (FD_SIZE / FD_BLOCKS are passed in from the board description).
+base = 0xA7000000
+size = 0x400000
+
+[boot_image_kernel]
+kernel_compression = "gzip"
+append_dtb         = true
+
+[boot_image]
+# v3 was measured on this device: fastboot boot of Mu-qrd8550.img returned
+# "Booting OKAY" (see the upstream comment). Note that UniXNU's bootimg.py parses
+# and verifies a v0 header, so it rejects v3 with "boot image header does not
+# match the requested parameters". Produce the boot image with a v3 capable
+# tool, or add a v3 branch to bootimg.py verify() before using it.
+header_version = 3
