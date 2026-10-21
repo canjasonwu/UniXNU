@@ -70,10 +70,12 @@ jobs:
       - name: Install host tools
         run: |
           sudo apt-get update
+          # uuid-dev is required by BaseTools GenFv/GenFw (uuid/uuid.h, -luuid).
           sudo apt-get install -y --no-install-recommends \
-            clang lld make python3 python3-pip device-tree-compiler
+            clang lld make python3 python3-pip device-tree-compiler uuid-dev
           clang --version | head -1
           ld.lld --version | head -1
+          test -f /usr/include/uuid/uuid.h
 
       - name: Install Mu pip requirements
         run: |
@@ -88,6 +90,8 @@ jobs:
 
       - name: build firmware
         run: |
+          # pipefail, otherwise the pipe to tee masks a non-zero exit of unixnu.
+          set -o pipefail
           python3 ./unixnu build firmware \
             --uefi uefi-fuxi \
             --edk2 uefi-fuxi/Mu_Basecore \
