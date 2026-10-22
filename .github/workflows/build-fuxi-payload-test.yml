@@ -59,6 +59,26 @@ jobs:
           cp devices/fuxi/uefi-config/fuxi.toml uefi-fuxi/Resources/Configs/fuxi.toml
           grep -q '0xA7000000' uefi-fuxi/Resources/Configs/fuxi.toml
 
+      - name: Normalise the cached firmware tree
+        run: |
+          # The checkout is cached between runs, so any edit a previous run made is
+          # still there. Restore the pieces that are toggled per run instead of
+          # assumed: the boot manager application (dropped for console-only runs)
+          # and the driver report switch (happens through the override copy).
+          python3 - <<'PY'
+          from pathlib import Path
+          fdf = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
+          t = fdf.read_text(encoding="utf-8")
+          fixed = t.replace("  #INF UniXNUPkg/Application/UniXNU/UniXNU.inf",
+                            "  INF UniXNUPkg/Application/UniXNU/UniXNU.inf")
+          if fixed != t:
+              fdf.write_text(fixed, encoding="utf-8")
+              print("restored the UniXNU application line")
+          else:
+              print("firmware tree already normalised")
+          PY
+          grep -n 'UniXNUPkg/Application' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+
       - name: Fix the fuxi FD rows to match uefiplatLA.cfg
         run: |
           python3 - <<'PY'
