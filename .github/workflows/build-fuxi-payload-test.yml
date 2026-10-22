@@ -20,6 +20,9 @@ on:
       console_only:
         description: '1 = leave the UniXNU app out so the DXE console text stays visible'
         default: '0'
+      app_debug:
+        description: '1 = print what the boot manager finds on each volume and freeze the panel'
+        default: '0'
 
 jobs:
   pipeline:
@@ -179,6 +182,33 @@ jobs:
           print("app removed, driver self-reports through reset or hang")
           PY
           grep -n 'FUXI_REPORT_RESULT' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+
+      - name: Instrument the boot manager config scan
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.app_debug == '1' }}
+        run: |
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("package/UniXNUPkg/Library/UniXNULib/Config.c")
+          if not p.is_file():
+              sys.exit("Config.c not found")
+          t = p.read_text(encoding="utf-8")
+          before = t
+          t = t.replace(
+              "        Loaded = TryVolume (Config, Handles[Index]);",
+              "        Loaded = TryVolume (Config, Handles[Index]);\n"
+              '        DEBUG ((DEBUG_ERROR, "UNIXNU: volume %u loaded=%u\\n", (UINT32)Index, (UINT32)Loaded));', 1)
+          t = t.replace(
+              "  Config->SourceLabel = AllocateCopyPool (StrSize (Label), Label);",
+              '  DEBUG ((DEBUG_ERROR, "UNIXNU: scan done loaded=%u error=%a\\n", (UINT32)Loaded, Config->Error));\n'
+              "  CpuDeadLoop ();\n"
+              "  Config->SourceLabel = AllocateCopyPool (StrSize (Label), Label);", 1)
+          if t == before:
+              sys.exit("Config.c patch did not apply")
+          p.write_text(t, encoding="utf-8")
+          print("boot manager scan instrumented")
+          PY
+          grep -n 'UNIXNU: volume' package/UniXNUPkg/Library/UniXNULib/Config.c
 
       - name: Install host tools
         run: |
