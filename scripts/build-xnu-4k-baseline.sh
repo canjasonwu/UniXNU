@@ -652,7 +652,7 @@ PY_GPU_BROKER
   if [ "$NATIVE_RAM_BLOCK" = 1 ]; then
     RAM_BLOCK_ARCHIVE=$ROOT/build/native-ram-block/libNativeRamBlock.a
     test -f "$RAM_BLOCK_ARCHIVE" || [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]
-    if [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" = 1 ]; then
+    if [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" = 1 ] && [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" != 1 ]; then
       # Both transports import the same original class. Keep one exact alias
       # definition; link the real RAM transport object, not duplicate aliases.
       python3 - "$VIRTIO_ARCHIVE" "$RAM_BLOCK_ARCHIVE" <<'PY_BINDINGS'
