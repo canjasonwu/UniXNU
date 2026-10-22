@@ -208,7 +208,7 @@ kernel_args = [
 #   sheng-disable-jobs, sheng-data-persist
 
 [payload.adt]
-tool = "scripts/make-fuxi-adt.py"     # TODO does not exist yet
+tool = "scripts/make-fuxi-adt.py"     # ported from sheng: the SM8550 addresses are the platform's, the identity strings are fuxi's
 chip_id = "207"                       # same SoC family as sheng; unverified here
 # 4.75 GiB, kept from sheng on purpose. This is how much DRAM the owner image is
 # told it has; a window smaller than the real 11.68 GiB is the safe choice during
