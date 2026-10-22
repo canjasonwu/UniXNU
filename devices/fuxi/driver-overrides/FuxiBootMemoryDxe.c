@@ -429,6 +429,18 @@ FindFatVolume (
       continue;
     }
 
+    //
+    // Only accept the payload volume: its label is FUXIESP. Scanning gigabytes
+    // of RAM otherwise matches any stray 0x55AA sector.
+    //
+    {
+      CONST CHAR8  *Label = (CONST CHAR8 *)(Sector + ((Sector[82] == 'F') ? 71 : 43));
+
+      if (CompareMem ((VOID *)Label, "FUXIESP", 7) != 0) {
+        continue;
+      }
+    }
+
     Bps   = (UINT32)Sector[11] | ((UINT32)Sector[12] << 8);
     Total = (UINT32)Sector[19] | ((UINT32)Sector[20] << 8) |
             ((UINT32)Sector[21] << 16) | ((UINT32)Sector[22] << 24);
@@ -509,6 +521,13 @@ PublishInitrd (
         break;
       }
       FatStart = 0;
+    }
+
+    if (FatStart == 0) {
+      DEBUG ((DEBUG_ERROR, "FUXIMEM: not in system memory, scanning 0x80000000-0x100000000\n"));
+      if (FindFatVolume (0x80000000ULL, 0x100000000ULL, &FatStart, &FatBytes)) {
+        DEBUG ((DEBUG_ERROR, "FUXIMEM: payload volume at 0x%lx size 0x%lx\n", FatStart, FatBytes));
+      }
     }
 
     if (FatStart == 0) {
