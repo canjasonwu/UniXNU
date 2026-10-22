@@ -139,6 +139,18 @@ jobs:
           PY
           grep -n 'FuxiBootMemoryDxe' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc
 
+      - name: Make the initrd discovery scan for the FAT volume
+        run: |
+          # ABL reports linux,initrd-start/-end as 0xB5A9A000-0xB7FFE515 on this
+          # board: 37 MiB long and not a multiple of the sector size, so the stock
+          # driver rejected it and never published a block device. The payload FAT
+          # image sits inside that range, so the patched driver scans it sector by
+          # sector for a FAT boot sector and publishes the volume that its BPB
+          # describes. Kept as a full file in devices/fuxi/driver-overrides/.
+          cp devices/fuxi/driver-overrides/FuxiBootMemoryDxe.c \
+             uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+          grep -n 'no FAT volume' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+
       - name: Optionally switch the driver to self-reporting mode
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.console_only == '1' }}
         run: |
@@ -167,18 +179,6 @@ jobs:
           print("app removed, driver self-reports through reset or hang")
           PY
           grep -n 'FUXI_REPORT_RESULT' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
-
-      - name: Make the initrd discovery scan for the FAT volume
-        run: |
-          # ABL reports linux,initrd-start/-end as 0xB5A9A000-0xB7FFE515 on this
-          # board: 37 MiB long and not a multiple of the sector size, so the stock
-          # driver rejected it and never published a block device. The payload FAT
-          # image sits inside that range, so the patched driver scans it sector by
-          # sector for a FAT boot sector and publishes the volume that its BPB
-          # describes. Kept as a full file in devices/fuxi/driver-overrides/.
-          cp devices/fuxi/driver-overrides/FuxiBootMemoryDxe.c \
-             uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
-          grep -n 'no FAT volume' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
 
       - name: Install host tools
         run: |
