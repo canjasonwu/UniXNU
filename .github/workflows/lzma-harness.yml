@@ -39,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang lld gcc-aarch64-linux-gnu qemu-user-static
+            clang lld gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user-static
 
       - name: Show the fixture
         run: |
@@ -79,13 +79,18 @@ jobs:
           clang -Oz -flto -fuse-ld=lld $INC $SRC -o v2_x86_Oz 2>&1 | tail -5
           RUNNER="" run v2_x86_Oz
 
-          echo "### variant 3: aarch64 gcc -O2 (qemu)"
-          aarch64-linux-gnu-gcc -O2 $INC $SRC -o v3_arm_O2 2>&1 | tail -5
+          echo "### variant 3: aarch64 clang -O2 (qemu)"
+          clang --target=aarch64-linux-gnu -fuse-ld=lld -O2 $INC $SRC -o v3_arm_O2 2>&1 | tail -5
           RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v3_arm_O2
 
-          echo "### variant 4: aarch64 gcc -Oz -flto (qemu, closest to the UEFI build)"
-          aarch64-linux-gnu-gcc -Oz -flto $INC $SRC -o v4_arm_Oz 2>&1 | tail -5
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v4_arm_Oz
+          echo "### variant 4: aarch64 clang -Oz -flto -mstrict-align (closest to the UEFI build)"
+          clang --target=aarch64-linux-gnu -fuse-ld=lld -Oz -flto -mstrict-align \
+                -fno-builtin -funsigned-char -mno-implicit-float $INC $SRC -o v4_arm_uefi 2>&1 | tail -5
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v4_arm_uefi
+
+          echo "### variant 5: aarch64 gcc -Oz -flto (qemu)"
+          aarch64-linux-gnu-gcc -Oz -flto -mstrict-align $INC $SRC -o v5_arm_gcc 2>&1 | tail -5
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v5_arm_gcc
 
           echo ""
           echo "### reference: a standard decoder on the same bytes"
