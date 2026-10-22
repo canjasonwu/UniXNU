@@ -87,18 +87,17 @@ def build(ctx, modules):
     env.update(xnu_env(ctx))
     env.update(version_env(modules))
     env['JOBS'] = str(ctx.jobs)
-    # The legacy script checks `test -f <archive>` before it compiles anything, so on a
-    # clean checkout the bootstrap pass can never produce the compile records it exists
-    # for. Build what the builders can make without those records first; the ones that
-    # need them fail here quietly and are retried after the pass.
-    build_archives(ctx, env, required=False)
     record = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json'
     if not record.is_file():
         # The archive builders and the boot progress layer read compile records of the XNU build, which only an earlier
         # pass leaves behind. A first build from scratch therefore runs one pass without them; it stops at the link,
         # which needs their archives, so only the records are required of it.
         log('kernel: bootstrap pass for the compile records')
-        subprocess_env = {**env, 'XNU_BOOT_PROGRESS': '0'}
+        # The bootstrap pass exists only for the compile records. The archive checks of
+        # the legacy script run before it compiles anything, and most archives cannot be
+        # built without those records (they need the installed kernel headers first), so
+        # the pass is told to walk past the missing ones and stop at the link as intended.
+        subprocess_env = {**env, 'XNU_BOOT_PROGRESS': '0', 'XNU_ALLOW_MISSING_ARCHIVES': '1'}
         try:
             run(['bash', script], cwd=ctx.tree, env=subprocess_env, log_file=ctx.logs / 'kernel-bootstrap.log')
         except Error:
