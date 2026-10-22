@@ -1,0 +1,189 @@
+# Prove the boot-entry pipeline for fuxi: payload volume, config parsing, ADT
+# generation and the DarwinBoot handoff all work, using a placeholder kernel.
+#
+# Why a placeholder: the real kernel needs out/<device>/tree to carry the device
+# half of the platform code (drivers/, kits/, package/, patches/), which the fuxi
+# device repository does not have yet. Everything downstream of the kernel --
+# the FAT payload volume, EFI/UniXNU/unixnu.toml, the ADT sidecar and the loader --
+# can still be exercised now, so that stage is not blocked behind the port.
+#
+# What this should produce: a boot image whose payload volume makes the UniXNU
+# menu list one "xnu" entry instead of "no boot entry found".
+#
+# Target location in the fork: .github/workflows/build-fuxi-payload-test.yml
+
+name: build fuxi payload pipeline test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout UniXNU fork with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout uefi-fuxi (fuxi branch)
+        uses: actions/checkout@v4
+        with:
+          repository: hanzi123-bilp/uefi-fuxi
+          ref: fuxi
+          path: uefi-fuxi
+          submodules: recursive
+
+      - name: Apply the corrected device config
+        run: |
+          set -e
+          cp devices/fuxi/uefi-config/fuxi.toml uefi-fuxi/Resources/Configs/fuxi.toml
+          grep -q '0xA7000000' uefi-fuxi/Resources/Configs/fuxi.toml
+
+      - name: Fix the fuxi FD rows to match uefiplatLA.cfg
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c")
+          t = p.read_text(encoding="utf-8")
+          before = t
+          t = re.sub(r'[ \t]*\{"FD Reserved".*?\},\r?\n', '', t)
+          t = re.sub(r'("UEFI FD",\s*)0xA7100000,\s*0x00300000', r'\g<1>0xA7000000, 0x00400000', t)
+          if t == before:
+              sys.exit("MemoryMapLib patch did not change anything")
+          p.write_text(t, encoding="utf-8")
+          print("patched MemoryMapLib")
+          PY
+
+      - name: Fix BootShim so the destination cache is invalidated before the copy
+        run: |
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/BootShim/BootShim.S")
+          t = p.read_text(encoding="utf-8")
+          old = "  ldr   x6,  =FD_SIZE\n\n_CopyLoop:"
+          if old not in t:
+              sys.exit("copy loop anchor not found in BootShim.S")
+          new = "".join([
+            "  ldr   x6,  =FD_SIZE\n",
+            "\n",
+            "  /* Discard stale dirty lines covering the destination before copying. */\n",
+            "  mrs   x9, ctr_el0\n",
+            "  ubfx  x9, x9, #16, #4\n",
+            "  mov   x10, #4\n",
+            "  lsl   x9, x10, x9\n",
+            "  sub   x10, x9, #1\n",
+            "  bic   x11, x5, x10\n",
+            "  add   x12, x5, x6\n",
+            "_InvalLoop:\n",
+            "  dc    ivac, x11\n",
+            "  add   x11, x11, x9\n",
+            "  cmp   x11, x12\n",
+            "  b.lo  _InvalLoop\n",
+            "  dsb   sy\n",
+            "\n",
+            "_CopyLoop:",
+          ])
+          p.write_text(t.replace(old, new, 1), encoding="utf-8")
+          print("BootShim invalidate loop inserted")
+          PY
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm make python3 python3-pip device-tree-compiler uuid-dev mtools
+          test -f /usr/include/uuid/uuid.h
+          for v in /usr/lib/llvm-*/bin; do echo "$v" >> "$GITHUB_PATH"; done
+          for t in clang lld-link llvm-lib llvm-rc llvm-objcopy llvm-nm llvm-ar; do
+            if ! command -v "$t" >/dev/null 2>&1; then
+              cand=$(ls /usr/lib/llvm-*/bin/"$t" 2>/dev/null | head -1 || true)
+              if [ -n "$cand" ]; then sudo ln -sf "$cand" "/usr/local/bin/$t"; fi
+            fi
+          done
+          command -v mformat && command -v mcopy
+
+      - name: Install Mu pip requirements
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r uefi-fuxi/pip-requirements.txt
+
+      - name: Shrink the payload volume for the pipeline test
+        run: |
+          # A placeholder kernel needs no 192 MiB volume, and a small boot image is
+          # much quicker to hand to fastboot. panic_screen is off because the
+          # placeholder is not an XNU Mach-O.
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          p = Path("devices/fuxi/board.toml")
+          t = p.read_text(encoding="utf-8")
+          t2 = re.sub(r'(?m)^size_mib = 192$', 'size_mib = 8', t)
+          t2 = re.sub(r'(?m)^panic_screen = true$', 'panic_screen = false', t2)
+          if t2 == t:
+              sys.exit("board.toml payload test patch did not apply")
+          p.write_text(t2, encoding="utf-8")
+          print("payload volume: 8 MiB, panic_screen off")
+          PY
+          grep -n 'size_mib\|panic_screen' devices/fuxi/board.toml | head -5
+
+      - name: defconfig
+        run: python3 ./unixnu defconfig fuxi_defconfig -D devices/fuxi
+
+      - name: fetch sources
+        run: python3 ./unixnu fetch
+
+      - name: build firmware
+        run: |
+          set -o pipefail
+          python3 ./unixnu build firmware \
+            --uefi uefi-fuxi \
+            --edk2 uefi-fuxi/Mu_Basecore \
+            --skip-preflight 2>&1 | tee firmware-build.log
+
+      - name: build the payload volume with a placeholder kernel
+        run: |
+          set -o pipefail
+          mkdir -p out/fuxi/payload-input
+          # Mach-O 64 magic plus padding: enough for the payload step to stage a
+          # file; the boot manager only needs a readable entry to list.
+          python3 - <<'PY'
+          from pathlib import Path
+          stub = Path("out/fuxi/payload-input/kernel.macho")
+          stub.parent.mkdir(parents=True, exist_ok=True)
+          stub.write_bytes(bytes.fromhex("cffaedfe") + bytes(4096))
+          print("placeholder kernel:", stub, stub.stat().st_size, "bytes")
+          PY
+          python3 ./unixnu build payload \
+            --uefi uefi-fuxi \
+            --kernel out/fuxi/payload-input/kernel.macho \
+            --unique-chip-id 0x1234567890abcdef 2>&1 | tee payload.log
+          ls -l out/fuxi/payload/
+
+      - name: make boot image with the payload volume
+        run: |
+          set -o pipefail
+          python3 ./unixnu bootimg \
+            --uefi uefi-fuxi \
+            --dtb devices/fuxi/fuxi-live.dtb \
+            -o out/fuxi/boot/boot-payload.img 2>&1 | tee bootimg.log
+          ls -l out/fuxi/boot/
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuxi-payload-test-${{ github.run_id }}
+          path: |
+            uefi-fuxi/Build/fuxiPkg/**/FV/*.fd
+            out/fuxi/boot/boot-payload.img
+            out/fuxi/payload/payload.json
+            payload.log
+            bootimg.log
+            firmware-build.log
+            out/fuxi/logs/**
+          if-no-files-found: warn
