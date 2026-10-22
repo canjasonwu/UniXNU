@@ -130,11 +130,12 @@ jobs:
           grep -n -A3 '_InvalLoop' uefi-fuxi/BootShim/BootShim.S
 
       - name: Install the test watchdog driver
-        if: ${{ inputs.watchdog_seconds != '' && inputs.watchdog_seconds != '0' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.watchdog_seconds != '' && inputs.watchdog_seconds != '0' }}
         env:
           WATCHDOG_SECONDS: ${{ inputs.watchdog_seconds }}
         run: |
           set -e
+          : "${WATCHDOG_SECONDS:=0}"
           driver=uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiWatchdog
           mkdir -p "$driver"
           cp devices/fuxi/watchdog/FuxiWatchdog.inf "$driver/"
