@@ -385,6 +385,12 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
   RamBlockFlush
 };
 
+#ifndef FUXI_REPORT_RESULT
+#define FUXI_REPORT_RESULT  0
+#endif
+
+STATIC BOOLEAN  mFatPublished = FALSE;
+
 STATIC
 VOID
 PublishInitrd (
@@ -488,6 +494,8 @@ PublishInitrd (
   mMedia.IoAlign          = 1;
   mMedia.LastBlock        = (End - Start) / RAM_BLOCK_SIZE - 1;
 
+  mFatPublished = TRUE;
+
   Handle = NULL;
   Status = gBS->InstallMultipleProtocolInterfaces (
                   &Handle,
@@ -526,5 +534,32 @@ FuxiBootMemoryDxeEntry (
 
   AddMemory ((VOID *)(UINTN)Dtb);
   PublishInitrd ((VOID *)(UINTN)Dtb);
+
+  //
+  // Diagnostic reporting channel. There is no USB function and no serial port
+  // once the firmware runs, so the only thing the host can observe is whether
+  // the device comes back by itself. Encode the result that way:
+  //   FAT volume published -> PSCI reset, the phone boots Android, adb appears
+  //   no FAT volume        -> hold the CPU, the phone stays on the panel
+  //
+#if FUXI_REPORT_RESULT
+  if (mFatPublished) {
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=found, resetting\n"));
+    gBS->Stall (2 * 1000 * 1000);
+  } else {
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=missing, holding\n"));
+    CpuDeadLoop ();
+  }
+
+  __asm__ __volatile__ (
+    "movz x0, #0x0009\n"
+    "movk x0, #0x8400, lsl #16\n"
+    "mov  x1, #0\n"
+    "mov  x2, #0\n"
+    "mov  x3, #0\n"
+    "smc  #0\n"
+    ::: "x0", "x1", "x2", "x3", "memory");
+#endif
+
   return EFI_SUCCESS;
 }
