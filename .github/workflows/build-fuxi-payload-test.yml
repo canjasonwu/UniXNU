@@ -32,7 +32,17 @@ jobs:
         with:
           submodules: recursive
 
+      # The Mu-Silicium checkout with its submodules is ~3.5 minutes of the run and
+      # changes only when the fork does, so it is cached and only cloned on a miss.
+      - name: Restore the Mu-Silicium checkout
+        id: cache-uefi
+        uses: actions/cache@v4
+        with:
+          path: uefi-fuxi
+          key: uefi-fuxi-fuxi-v1
+
       - name: Checkout uefi-fuxi (fuxi branch)
+        if: steps.cache-uefi.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: hanzi123-bilp/uefi-fuxi
@@ -188,6 +198,12 @@ jobs:
             fi
           done
           command -v mformat && command -v mcopy
+
+      - name: Restore the EDK2 build tree
+        uses: actions/cache@v4
+        with:
+          path: uefi-fuxi/Build
+          key: fuxi-edk2-build-v1
 
       - name: Install Mu pip requirements
         run: |
