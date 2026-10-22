@@ -400,7 +400,8 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
 #define FUXI_REPORT_RESULT  0
 #endif
 
-STATIC BOOLEAN  mFatPublished = FALSE;
+STATIC BOOLEAN  mFatPublished  = FALSE;
+STATIC EFI_STATUS  mPublishStatus = EFI_NOT_READY;
 
 STATIC
 BOOLEAN
@@ -551,8 +552,6 @@ PublishInitrd (
   mMedia.IoAlign          = 1;
   mMedia.LastBlock        = (End - Start) / RAM_BLOCK_SIZE - 1;
 
-  mFatPublished = TRUE;
-
   Handle = NULL;
   Status = gBS->InstallMultipleProtocolInterfaces (
                   &Handle,
@@ -562,6 +561,8 @@ PublishInitrd (
                   &mBlockIo,
                   NULL
                   );
+  mPublishStatus = Status;
+  mFatPublished  = (BOOLEAN)!EFI_ERROR (Status);
   DEBUG ((DEBUG_ERROR, "FUXIMEM: initrd block device 0x%lx size 0x%lx %r\n", Start, End - Start, Status));
 }
 
@@ -601,16 +602,21 @@ FuxiBootMemoryDxeEntry (
   //
 #if FUXI_REPORT_RESULT
   //
-  // Always reset, and encode the result in how long the boot takes: the host
-  // measures from "fastboot boot" to adb answering. Holding the CPU would report
-  // just as well, but then nothing can bring the phone back except a human.
+  // Always reset, and encode the block device install status in how long the
+  // boot takes: seconds = 5 + status * 8. The host measures from "fastboot boot"
+  // to adb answering and subtracts the baseline boot time, so codes stay
+  // readable without a human looking at the panel.
   //
-  if (mFatPublished) {
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=found, resetting after 5s\n"));
-    gBS->Stall (5 * 1000 * 1000);
-  } else {
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=missing, resetting after 20s\n"));
-    gBS->Stall (20 * 1000 * 1000);
+  {
+    UINTN  Code = (UINTN)mPublishStatus;
+
+    if (Code > 15) {
+      Code = 15;
+    }
+
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT status=%r code=%u delay=%us\n",
+            mPublishStatus, (UINT32)Code, (UINT32)(5 + Code * 8)));
+    gBS->Stall ((5 + Code * 8) * 1000 * 1000);
   }
 
   __asm__ __volatile__ (
