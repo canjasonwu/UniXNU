@@ -97,11 +97,13 @@ def build(ctx, modules):
         # the legacy script run before it compiles anything, and most archives cannot be
         # built without those records (they need the installed kernel headers first), so
         # the pass is told to walk past the missing ones and stop at the link as intended.
-        # MAKEFLAGS=-k was tried here to keep make going past the link failure so the
-        # other areas would still compile. It did not work: the pass ended earlier
-        # than without it. Left out until someone works out why.
+        # -k on the make line keeps it going after the first area's link fails with
+        # the archives absent, so osfmk and iokit still compile and leave the records
+        # the archive builders read. Without it the pass stops after bsd and never
+        # produces them. MAKEFLAGS does not work here: it reaches the recursive makes
+        # and the pass ends even earlier, so the flag goes on the command line.
         subprocess_env = {**env, 'XNU_BOOT_PROGRESS': '0',
-                          'XNU_ALLOW_MISSING_ARCHIVES': '1'}
+                          'XNU_ALLOW_MISSING_ARCHIVES': '1', 'XNU_MAKE_FLAGS': '-k'}
         try:
             run(['bash', script], cwd=ctx.tree, env=subprocess_env, log_file=ctx.logs / 'kernel-bootstrap.log')
         except Error:
