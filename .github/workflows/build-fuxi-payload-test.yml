@@ -137,13 +137,13 @@ jobs:
           PY
           grep -n 'FuxiBootMemoryDxe' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc
 
-      - name: Optionally drop the UniXNU app for a console-only run
+      - name: Optionally switch the driver to self-reporting mode
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.console_only == '1' }}
         run: |
-          # The boot manager draws over the whole panel, which hides every DEBUG
-          # line the drivers printed before it. Leaving the application out keeps
-          # the console text on screen so the FUXIMEM:/MMU/volume-scan messages
-          # can be read and photographed.
+          # There is no USB function and no serial port while the firmware runs, so the
+          # host cannot read the panel. In reporting mode the driver encodes the result:
+          # reset -> the FAT volume was published, hold -> it was not. The UniXNU app is
+          # also left out so nothing draws over the console.
           python3 - <<'PY'
           import sys
           from pathlib import Path
@@ -155,22 +155,16 @@ jobs:
           if t == before:
               sys.exit("UniXNU app entry not found in the FDF")
           fdf.write_text(t, encoding="utf-8")
-          # BDS runs a boot attempt after a timeout and powers the board off, which
-          # wipes the panel before it can be read. Hold the CPU after the driver has
-          # printed and published, so the console text stays put.
           src = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c")
           s = src.read_text(encoding="utf-8")
-          old = "  AddMemory ((VOID *)(UINTN)Dtb);\n  PublishInitrd ((VOID *)(UINTN)Dtb);\n  return EFI_SUCCESS;"
-          if old not in s:
-              sys.exit("hold anchor not found in FuxiBootMemoryDxe.c")
-          new = ("  AddMemory ((VOID *)(UINTN)Dtb);\n  PublishInitrd ((VOID *)(UINTN)Dtb);\n"
-                 '  DEBUG ((DEBUG_ERROR, "FUXIMEM: holding the panel for diagnostics\\n"));\n'
-                 "  CpuDeadLoop ();\n  return EFI_SUCCESS;")
-          src.write_text(s.replace(old, new, 1), encoding="utf-8")
-          print("UniXNU app removed and the driver now holds the panel")
+          before = s
+          s = s.replace("#define FUXI_REPORT_RESULT  0", "#define FUXI_REPORT_RESULT  1")
+          if s == before:
+              sys.exit("report switch not found")
+          src.write_text(s, encoding="utf-8")
+          print("app removed, driver self-reports through reset or hang")
           PY
-          grep -n 'UniXNU' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf | head -5
-          grep -n 'CpuDeadLoop' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+          grep -n 'FUXI_REPORT_RESULT' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
 
       - name: Make the initrd discovery scan for the FAT volume
         run: |
