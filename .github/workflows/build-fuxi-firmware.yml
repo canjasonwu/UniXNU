@@ -315,6 +315,85 @@ jobs:
           PY
           grep -n 'SUM %x\|DEC2' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
+      - name: Fix BootShim so the destination cache is invalidated before the copy
+        run: |
+          # BootShim copies the firmware volume with the MMU off and then runs
+          #   dc cvac   (clean)
+          # over the whole destination. It never invalidates the destination
+          # range, so on a warm reboot any stale dirty line left over from the
+          # previous boot is written back over the freshly copied bytes. That
+          # corrupts scattered bytes of the FV -- and because FVMAIN is an LZMA
+          # stream, a single wrong byte makes the decoder report SZ_ERROR_DATA
+          # part way through, which is exactly what the panel shows.
+          #
+          # Invalidate [FD_BASE, FD_BASE + FD_SIZE) before the copy loop.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/BootShim/BootShim.S")
+          t = p.read_text(encoding="utf-8")
+          old = "  ldr   x6,  =FD_SIZE\n\n_CopyLoop:"
+          if old not in t:
+              sys.exit("copy loop anchor not found in BootShim.S")
+          new = "".join([
+            "  ldr   x6,  =FD_SIZE\n",
+            "\n",
+            "  /* Discard stale dirty lines covering the destination before copying. */\n",
+            "  mrs   x9, ctr_el0\n",
+            "  ubfx  x9, x9, #16, #4\n",
+            "  mov   x10, #4\n",
+            "  lsl   x9, x10, x9\n",
+            "  sub   x10, x9, #1\n",
+            "  bic   x11, x5, x10\n",
+            "  add   x12, x5, x6\n",
+            "_InvalLoop:\n",
+            "  dc    ivac, x11\n",
+            "  add   x11, x11, x9\n",
+            "  cmp   x11, x12\n",
+            "  b.lo  _InvalLoop\n",
+            "  dsb   sy\n",
+            "\n",
+            "_CopyLoop:",
+          ])
+          p.write_text(t.replace(old, new, 1), encoding="utf-8")
+          print("BootShim invalidate loop inserted")
+          PY
+          grep -n -A3 '_InvalLoop' uefi-fuxi/BootShim/BootShim.S
+
+      - name: Reset the device when FV decompression fails
+        run: |
+          # A failed boot leaves the panel showing the SEC log and the phone
+          # completely unreachable, so every experiment needs a manual power
+          # cycle. Reset through PSCI SYSTEM_RESET (0x84000009) instead: the
+          # phone reboots to Android on its own, adb can take it back to the
+          # bootloader, and the whole test loop becomes hands free.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = "        return EFI_NOT_FOUND;\n      }\n\n      return FfsProcessSection ("
+          if anchor not in t:
+              sys.exit("failure return anchor not found")
+          reset = "".join([
+            '        DEBUG ((DEBUG_ERROR, "RESETTING\\n"));\n',
+            "        __asm__ __volatile__ (\n",
+            '          "movz x0, #0x0009\\n"\n',
+            '          "movk x0, #0x8400, lsl #16\\n"\n',
+            '          "mov  x1, #0\\n"\n',
+            '          "mov  x2, #0\\n"\n',
+            '          "mov  x3, #0\\n"\n',
+            '          "smc  #0\\n"\n',
+            '          ::: "x0", "x1", "x2", "x3", "memory");\n',
+            "        return EFI_NOT_FOUND;\n",
+            "      }\n\n      return FfsProcessSection (",
+          ])
+          t = t.replace(anchor, reset, 1)
+          p.write_text(t, encoding="utf-8")
+          print("PSCI reset inserted")
+          PY
+          grep -n 'RESETTING' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
+
       - name: Raise the LZMA scratch budget above the dictionary size
         run: |
           # SCRATCH_BUFFER_REQUEST_SIZE is a hard 64 KiB and SzAlloc is a bump
