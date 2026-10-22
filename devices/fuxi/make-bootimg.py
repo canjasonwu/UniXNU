@@ -85,6 +85,33 @@ def check_shim(shim, fd_len, fd_base, requires_header):
         sys.exit(f"boot shim image_size {image_size:#x} != shim + firmware {want:#x}")
 
 
+def fix_fat32_bpb(ramdisk):
+    """Make a small FAT32 volume acceptable to the EDK2 Fat driver.
+
+    mtools writes the sector count of a small FAT32 volume into the FAT16 field
+    at offset 19 and leaves BPB_TotSec32 at offset 32 at zero. EDK2's Fat driver
+    classifies the volume as FAT32 because BPB_FATSz16 is zero, then reads
+    BPB_TotSec32, computes a zero sized volume and refuses to mount it, so the
+    boot manager sees no filesystem at all. Move the count where a FAT32 reader
+    expects it.
+    """
+    if len(ramdisk) < 512:
+        return ramdisk, "too small"
+    bps = int.from_bytes(ramdisk[11:13], "little")
+    fatsz16 = int.from_bytes(ramdisk[22:24], "little")
+    total16 = int.from_bytes(ramdisk[19:21], "little")
+    total32 = int.from_bytes(ramdisk[32:36], "little")
+    fstype = bytes(ramdisk[82:90])
+    if bps == 0 or fatsz16 != 0 or b"FAT32" not in fstype:
+        return ramdisk, "not FAT32"
+    if total32 != 0 or total16 == 0:
+        return ramdisk, "already consistent"
+    fixed = bytearray(ramdisk)
+    fixed[19:21] = b"\x00\x00"
+    fixed[32:36] = total16.to_bytes(4, "little")
+    return bytes(fixed), "moved %d sectors to TotSec32" % total16
+
+
 def make_image(uefi, device, target, dtb_path, output, fd_override, shim_override, ramdisk_override=None,
                header_version_override=None, dtb_field=False):
     cfg = load_config(uefi, device)
@@ -152,8 +179,12 @@ def make_image(uefi, device, target, dtb_path, output, fd_override, shim_overrid
     # mkbootimg reads files, so write the kernel next to the output first.
     kernel_file = output.with_suffix(".kernel")
     kernel_file.write_bytes(kernel)
+    ramdisk_bytes, bp_note = fix_fat32_bpb(ramdisk.read_bytes())
+    print(f"ramdisk: {len(ramdisk_bytes)} bytes, FAT BPB {bp_note}")
+    ramdisk_file = output.with_suffix(".ramdisk")
+    ramdisk_file.write_bytes(ramdisk_bytes)
     command = [sys.executable, str(mkbootimg),
-               "--kernel", str(kernel_file), "--ramdisk", str(ramdisk),
+               "--kernel", str(kernel_file), "--ramdisk", str(ramdisk_file),
                "-o", str(output), "--header_version", str(header_version),
                "--pagesize", str(PAGE)]
     if use_dtb_field:
@@ -161,7 +192,7 @@ def make_image(uefi, device, target, dtb_path, output, fd_override, shim_overrid
     run(command)
 
     verify(output, combined, tree if (append_dtb and not use_dtb_field) else b"",
-           ramdisk.read_bytes(), header_version, use_dtb_field, tree)
+           ramdisk_bytes, header_version, use_dtb_field, tree)
     print(f"boot image: {output} ({output.stat().st_size} bytes)")
     print(f"  gzip(payload) {len(kernel)} bytes, sha256 {hashlib.sha256(output.read_bytes()).hexdigest()}")
     return 0
