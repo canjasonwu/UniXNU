@@ -242,6 +242,46 @@ jobs:
           PY
           grep -n 'MEM dst' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
+      - name: Instrument payload checksum and a second decode attempt
+        run: |
+          # The four sampled words only cover 4 KB, 256 KB, 512 KB and 768 KB of
+          # the payload, but decoding stops around 93 KB of input, which falls
+          # between samples. Print a checksum over the whole payload (host
+          # computes the same) and retry the decode into a different buffer, so
+          # "data is wrong" and "that buffer is wrong" can be told apart.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = '        DEBUG ((DEBUG_ERROR, "Decompress Failed - %r\\n", Status));\n        return EFI_NOT_FOUND;'
+          if anchor not in t:
+              sys.exit("failure print anchor not found")
+          probe = "".join([
+            '        DEBUG ((DEBUG_ERROR, "Decompress Failed - %r\\n", Status));\n',
+            "        {\n",
+            "          extern RETURN_STATUS EFIAPI LzmaUefiDecompress (IN CONST VOID *, IN UINTN, IN OUT VOID *, IN OUT VOID *);\n",
+            "          UINT8          *S = (UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
+            "          UINTN           N = GetSectionNSize (Section) - ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
+            "          UINT32          Sum = 0;\n",
+            "          UINTN           I;\n",
+            "          RETURN_STATUS   St2;\n",
+            "\n",
+            "          for (I = 0; I < N; I++) {\n",
+            "            Sum = (Sum * 31) + S[I];\n",
+            "          }\n",
+            '          DEBUG ((DEBUG_ERROR, "SUM %x n=%x\\n", Sum, N));\n',
+            "          St2 = LzmaUefiDecompress (S, N, ScratchBuffer, (UINT8 *)ScratchBuffer + 0x530000);\n",
+            '          DEBUG ((DEBUG_ERROR, "DEC2 %r\\n", St2));\n',
+            "        }\n",
+            "        return EFI_NOT_FOUND;",
+          ])
+          t = t.replace(anchor, probe, 1)
+          p.write_text(t, encoding="utf-8")
+          print("checksum and retry probes inserted")
+          PY
+          grep -n 'SUM %x\|DEC2' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
+
       - name: Raise the LZMA scratch budget above the dictionary size
         run: |
           # SCRATCH_BUFFER_REQUEST_SIZE is a hard 64 KiB and SzAlloc is a bump
