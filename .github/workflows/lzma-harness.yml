@@ -58,9 +58,11 @@ jobs:
         run: |
           set +e
           SDK=uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/Sdk/C
-          SRC="devices/fuxi/test/lzma_harness.c $SDK/LzmaDec.c"
+          H=devices/fuxi/test/lzma_harness.c
           PAY=devices/fuxi/test/lzma-payload.bin
           INC="-I$SDK"
+          ARM="--target=aarch64-linux-gnu -fuse-ld=lld -Oz -flto -mstrict-align -fno-builtin -funsigned-char -mno-implicit-float"
+          UEFI_DEFS="-D_LZMA_SIZE_OPT -Dmemcpy=CopyMem -Dmemmove=CopyMem"
 
           run() {
             label="$1"; shift
@@ -71,23 +73,29 @@ jobs:
             echo "  exit=$?"
           }
 
-          echo "### A: x86_64 clang -O2, page aligned destination"
-          clang -O2 $INC $SRC -o vA_x86 2>&1 | tail -5
-          RUNNER="" run vA_x86 $PAY 0x10000 0
+          echo "### A: control, libc memcpy, full decoder (what was tested so far)"
+          clang -O2 $INC -c $SDK/LzmaDec.c -o a.o 2>&1 | tail -3
+          clang -O2 $INC -c $H -o ah.o 2>&1 | tail -3
+          clang ah.o a.o -o vA 2>&1 | tail -3
+          RUNNER="" run vA $PAY 0x10000 0
 
-          echo "### B: aarch64 clang -Oz -flto -mstrict-align, page aligned destination"
-          clang --target=aarch64-linux-gnu -fuse-ld=lld -Oz -flto -mstrict-align \
-                -fno-builtin -funsigned-char -mno-implicit-float $INC $SRC -o vB_arm 2>&1 | tail -5
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x10000 0
+          echo "### B: _LZMA_SIZE_OPT only (UefiLzma.h size optimised path)"
+          clang -O2 $INC -D_LZMA_SIZE_OPT -c $SDK/LzmaDec.c -o b.o 2>&1 | tail -3
+          clang -O2 $INC -D_LZMA_SIZE_OPT -c $H -o bh.o 2>&1 | tail -3
+          clang bh.o b.o -o vB 2>&1 | tail -3
+          RUNNER="" run vB $PAY 0x10000 0
 
-          echo "### C: aarch64 same build, destination offset by 4"
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x10000 4
+          echo "### C: exact firmware defines, x86_64"
+          clang -O2 $INC $UEFI_DEFS -c $SDK/LzmaDec.c -o c.o 2>&1 | tail -3
+          clang -O2 $INC $UEFI_DEFS -c $H -o ch.o 2>&1 | tail -3
+          clang ch.o c.o -o vC 2>&1 | tail -3
+          RUNNER="" run vC $PAY 0x10000 0
 
-          echo "### D: aarch64 same build, destination offset by 4092 (exactly what PrePiLib does)"
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x10000 4092
-
-          echo "### E: aarch64 same build, scratch 17 MiB and offset 4092"
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x1100000 4092
+          echo "### D: exact firmware defines, AArch64 with the UEFI flags, dst+4092"
+          clang $ARM $INC $UEFI_DEFS -c $SDK/LzmaDec.c -o d.o 2>&1 | tail -3
+          clang $ARM $INC $UEFI_DEFS -c $H -o dh.o 2>&1 | tail -3
+          clang $ARM dh.o d.o -o vD 2>&1 | tail -3
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vD $PAY 0x10000 4092
 
           echo ""
           echo "### reference: a standard decoder on the same bytes"
