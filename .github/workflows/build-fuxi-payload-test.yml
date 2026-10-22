@@ -145,9 +145,22 @@ jobs:
           if t == before:
               sys.exit("UniXNU app entry not found in the FDF")
           fdf.write_text(t, encoding="utf-8")
-          print("UniXNU application removed from the firmware volume")
+          # BDS runs a boot attempt after a timeout and powers the board off, which
+          # wipes the panel before it can be read. Hold the CPU after the driver has
+          # printed and published, so the console text stays put.
+          src = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c")
+          s = src.read_text(encoding="utf-8")
+          old = "  AddMemory ((VOID *)(UINTN)Dtb);\n  PublishInitrd ((VOID *)(UINTN)Dtb);\n  return EFI_SUCCESS;"
+          if old not in s:
+              sys.exit("hold anchor not found in FuxiBootMemoryDxe.c")
+          new = ("  AddMemory ((VOID *)(UINTN)Dtb);\n  PublishInitrd ((VOID *)(UINTN)Dtb);\n"
+                 '  DEBUG ((DEBUG_ERROR, "FUXIMEM: holding the panel for diagnostics\\n"));\n'
+                 "  CpuDeadLoop ();\n  return EFI_SUCCESS;")
+          src.write_text(s.replace(old, new, 1), encoding="utf-8")
+          print("UniXNU app removed and the driver now holds the panel")
           PY
           grep -n 'UniXNU' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf | head -5
+          grep -n 'CpuDeadLoop' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
 
       - name: Install host tools
         run: |
