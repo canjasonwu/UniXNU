@@ -53,11 +53,13 @@ CONFIG_XNU_BOOT_PROGRESS=y
 #     TODO: re-enable once the kernel boots to console. Adreno 740 is the same part
 #     as on sheng, so NativeAdreno is the most likely reusable driver on this board.
 
-# TODO CONFIG_XNU_OWNER_DATA_VOLUME_UUID
-#   The scratch Data volume UUID. This value must equal the UUID written into the
+# The scratch Data volume UUID. This value must equal the UUID written into the
 #   userdata manifest when build userdata runs, so pick one value and keep it.
 #   sheng uses 18AB5557-DC2D-469B-8758-855E60F5B0DF. Not copied: a distinct value
 #   makes an accidental cross-device mount impossible.
+#   Value below is fuxi's own, chosen when the kernel step first needed it; the
+#   kernel records it and compares it against the mounted scratch volume.
+CONFIG_XNU_OWNER_DATA_VOLUME_UUID="5C3B8E14-2A6D-4F79-B0E3-8D41F2A7C95E"
 
 CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a"
