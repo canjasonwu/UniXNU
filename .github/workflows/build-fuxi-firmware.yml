@@ -242,6 +242,39 @@ jobs:
           PY
           grep -n 'MEM dst' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
+      - name: Instrument a checksum before the decode
+        run: |
+          # SUM is currently computed only after the decode failed, so a mismatch
+          # cannot distinguish "the source was already wrong" from "the decoder
+          # damaged its own input". Take the same checksum immediately before the
+          # decode call as SUM1 and compare it with the offline value.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = "      if (Section->Type == EFI_SECTION_COMPRESSION) {"
+          if anchor not in t:
+              sys.exit("decode dispatch anchor not found")
+          probe = "".join([
+            "      {\n",
+            "        UINT8  *TS = (UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
+            "        UINTN   TN = GetSectionNSize (Section) - ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
+            "        UINT32  TSum = 0;\n",
+            "        UINTN   TI;\n",
+            "\n",
+            "        for (TI = 0; TI < TN; TI++) {\n",
+            "          TSum = (TSum * 31) + TS[TI];\n",
+            "        }\n",
+            '        DEBUG ((DEBUG_ERROR, "SUM1 %x n=%x\\n", TSum, TN));\n',
+            "      }\n",
+          ])
+          t = t.replace(anchor, probe + anchor, 1)
+          p.write_text(t, encoding="utf-8")
+          print("pre-decode checksum inserted")
+          PY
+          grep -n 'SUM1' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
+
       - name: Instrument payload checksum and a second decode attempt
         run: |
           # The four sampled words only cover 4 KB, 256 KB, 512 KB and 768 KB of
@@ -270,7 +303,7 @@ jobs:
             "          for (I = 0; I < N; I++) {\n",
             "            Sum = (Sum * 31) + S[I];\n",
             "          }\n",
-            '          DEBUG ((DEBUG_ERROR, "SUM %x n=%x\\n", Sum, N));\n',
+            '          DEBUG ((DEBUG_ERROR, "SUM2 %x n=%x\\n", Sum, N));\n',
             "          St2 = LzmaUefiDecompress (S, N, ScratchBuffer, (UINT8 *)ScratchBuffer + 0x530000);\n",
             '          DEBUG ((DEBUG_ERROR, "DEC2 %r\\n", St2));\n',
             "        }\n",
