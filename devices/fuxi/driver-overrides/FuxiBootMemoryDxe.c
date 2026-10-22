@@ -608,15 +608,10 @@ FuxiBootMemoryDxeEntry (
   // readable without a human looking at the panel.
   //
   {
-    UINTN  Code = (UINTN)mPublishStatus;
+    UINTN  Delay = EFI_ERROR (mPublishStatus) ? 65 : 5;
 
-    if (Code > 15) {
-      Code = 15;
-    }
-
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT status=%r code=%u delay=%us\n",
-            mPublishStatus, (UINT32)Code, (UINT32)(5 + Code * 8)));
-    gBS->Stall ((5 + Code * 8) * 1000 * 1000);
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT status=%r delay=%us\n", mPublishStatus, (UINT32)Delay));
+    gBS->Stall (Delay * 1000 * 1000);
   }
 
   __asm__ __volatile__ (
