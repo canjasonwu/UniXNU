@@ -102,8 +102,17 @@ def build(ctx, modules):
         # the archive builders read. Without it the pass stops after bsd and never
         # produces them. MAKEFLAGS does not work here: it reaches the recursive makes
         # and the pass ends even earlier, so the flag goes on the command line.
+        # `build` is one aggregate target, so a link failure anywhere aborts it and the
+        # later areas never compile. Building the per-component recursive targets with -k
+        # instead lets each area compile and fail on its own link, which is exactly what
+        # the record pass needs: the objects and their .o.json come out, the link does
+        # not matter here.
         subprocess_env = {**env, 'XNU_BOOT_PROGRESS': '0',
-                          'XNU_ALLOW_MISSING_ARCHIVES': '1', 'XNU_MAKE_FLAGS': '-k'}
+                          'XNU_ALLOW_MISSING_ARCHIVES': '1', 'XNU_MAKE_FLAGS': '-k',
+                          'XNU_MAKE_TARGETS': ' '.join(
+                              'build_all_recurse_into_' + area
+                              for area in ('bsd', 'iokit', 'libkern', 'libsa', 'osfmk',
+                                           'pexpert', 'san', 'security'))}
         try:
             run(['bash', script], cwd=ctx.tree, env=subprocess_env, log_file=ctx.logs / 'kernel-bootstrap.log')
         except Error:
