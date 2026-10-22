@@ -161,7 +161,7 @@ jobs:
           python3 ./unixnu build payload \
             --uefi uefi-fuxi \
             --kernel out/fuxi/payload-input/kernel.macho \
-            --unique-chip-id 0x1234567890abcdef 2>&1 | tee payload.log
+            --unique-chip-id 0x437cad96a2f 2>&1 | tee payload.log
           ls -l out/fuxi/payload/
 
       - name: make boot image with the payload volume
