@@ -85,7 +85,8 @@ def check_shim(shim, fd_len, fd_base, requires_header):
         sys.exit(f"boot shim image_size {image_size:#x} != shim + firmware {want:#x}")
 
 
-def make_image(uefi, device, target, dtb_path, output, fd_override, shim_override, ramdisk_override=None):
+def make_image(uefi, device, target, dtb_path, output, fd_override, shim_override, ramdisk_override=None,
+               header_version_override=None, dtb_field=False):
     cfg = load_config(uefi, device)
     fd_cfg = cfg.get("uefi_fd") or {}
     fd_base = fd_cfg.get("base")
@@ -98,6 +99,8 @@ def make_image(uefi, device, target, dtb_path, output, fd_override, shim_overrid
     image_cfg = cfg.get("boot_image") or {}
     requires_header = bool(shim_cfg.get("requires_kernel_header", True))
     header_version = int(image_cfg.get("header_version", 0))
+    if header_version_override is not None:
+        header_version = int(header_version_override)
     compression = kernel_cfg.get("kernel_compression", "gzip")
     append_dtb = bool(kernel_cfg.get("append_dtb", True))
 
@@ -124,7 +127,13 @@ def make_image(uefi, device, target, dtb_path, output, fd_override, shim_overrid
         kernel = combined
     else:
         sys.exit(f"unknown kernel compression: {compression}")
-    if append_dtb:
+    # Header v0..v2 carry a dtb field, so ABL parses the tree, fills in the
+    # initrd properties for the ramdisk it loaded and hands that tree on. v3 has
+    # no such field and ABL keeps its own device tree instead, whose
+    # /chosen/linux,initrd-* still describe the previous Android boot - which is
+    # why the firmware looked for the payload at a 37 MiB range that holds no FAT.
+    use_dtb_field = dtb_field and header_version < 3
+    if append_dtb and not use_dtb_field:
         kernel += tree
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -143,17 +152,21 @@ def make_image(uefi, device, target, dtb_path, output, fd_override, shim_overrid
     # mkbootimg reads files, so write the kernel next to the output first.
     kernel_file = output.with_suffix(".kernel")
     kernel_file.write_bytes(kernel)
-    run([sys.executable, str(mkbootimg),
-         "--kernel", str(kernel_file), "--ramdisk", str(ramdisk),
-         "-o", str(output), "--header_version", str(header_version)])
+    command = [sys.executable, str(mkbootimg),
+               "--kernel", str(kernel_file), "--ramdisk", str(ramdisk),
+               "-o", str(output), "--header_version", str(header_version)]
+    if use_dtb_field:
+        command += ["--dtb", str(dtb_path)]
+    run(command)
 
-    verify(output, combined, tree if append_dtb else b"", ramdisk.read_bytes(), header_version)
+    verify(output, combined, tree if (append_dtb and not use_dtb_field) else b"",
+           ramdisk.read_bytes(), header_version, use_dtb_field, tree)
     print(f"boot image: {output} ({output.stat().st_size} bytes)")
     print(f"  gzip(payload) {len(kernel)} bytes, sha256 {hashlib.sha256(output.read_bytes()).hexdigest()}")
     return 0
 
 
-def verify(path, combined, tree, ramdisk, header_version):
+def verify(path, combined, tree, ramdisk, header_version, dtb_field=False, dtb_bytes=b""):
     data = path.read_bytes()
     if data[:8] != MAGIC:
         sys.exit("output is not an Android boot image")
@@ -161,7 +174,7 @@ def verify(path, combined, tree, ramdisk, header_version):
     got_version = struct.unpack_from("<I", data, 40)[0]
     if got_version != header_version:
         sys.exit(f"header_version {got_version} != requested {header_version}")
-    if header_size not in (1580, 1584):
+    if header_version >= 3 and header_size not in (1580, 1584):
         sys.exit(f"unexpected v3 header size {header_size}")
 
     kernel = data[PAGE:PAGE + kernel_size]
@@ -195,9 +208,12 @@ def main():
     ap.add_argument("--fd", default=None)
     ap.add_argument("--ramdisk", default=None, help="payload volume for the ramdisk field (default: the empty stub)")
     ap.add_argument("--shim", default=None, help="use this BootShim.bin instead of compiling one")
+    ap.add_argument("--header-version", default=None, help="override boot_image.header_version")
+    ap.add_argument("--dtb-field", action="store_true",
+                    help="put the device tree in the header dtb field (v0-v2) instead of appending it")
     args = ap.parse_args()
     return make_image(args.uefi, args.device, args.target, args.dtb, args.output,
-                      args.fd, args.shim, args.ramdisk)
+                      args.fd, args.shim, args.ramdisk, args.header_version, args.dtb_field)
 
 
 if __name__ == "__main__":
