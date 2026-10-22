@@ -263,10 +263,17 @@ jobs:
           # unixnu bootimg verifies a v0 header layout and fuxi needs v3, so the
           # image is assembled with the device's own v3-aware script.
           set -o pipefail
+          # v3 headers have no dtb field, so ABL never sees this device tree and
+          # keeps its own one, whose /chosen/linux,initrd-* still point at the
+          # previous Android boot. v2 carries the tree, ABL fills the initrd
+          # properties in for the ramdisk it just loaded, and the firmware then
+          # finds the payload exactly where it says.
           python3 devices/fuxi/make-bootimg.py \
             --uefi uefi-fuxi \
             --dtb devices/fuxi/fuxi-live.dtb \
             --ramdisk out/fuxi/payload/payload.img \
+            --header-version 2 \
+            --dtb-field \
             --output out/fuxi/boot/boot-payload.img 2>&1 | tee bootimg.log
           ls -l out/fuxi/boot/
 
