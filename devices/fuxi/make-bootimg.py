@@ -86,30 +86,47 @@ def check_shim(shim, fd_len, fd_base, requires_header):
 
 
 def fix_fat32_bpb(ramdisk):
-    """Make a small FAT32 volume acceptable to the EDK2 Fat driver.
+    """Make a payload volume that EDK2 will actually mount.
 
-    mtools writes the sector count of a small FAT32 volume into the FAT16 field
-    at offset 19 and leaves BPB_TotSec32 at offset 32 at zero. EDK2's Fat driver
-    classifies the volume as FAT32 because BPB_FATSz16 is zero, then reads
-    BPB_TotSec32, computes a zero sized volume and refuses to mount it, so the
-    boot manager sees no filesystem at all. Move the count where a FAT32 reader
-    expects it.
+    Two problems, both caused by mtools writing a volume that DOS accepts but
+    that the EDK2 disk stack misreads:
+
+    1. A small FAT32 volume gets its sector count in the FAT16 field at offset
+       19 while BPB_TotSec32 at offset 32 stays zero. EnhancedFatDxe classifies
+       the volume as FAT32 because BPB_FATSz16 is zero, reads BPB_TotSec32,
+       computes a zero sized volume and refuses it.
+    2. The volume boot record keeps the classic MS-DOS boot code, and bytes
+       446..462 of it happen to decode as a valid MBR partition entry (bootable,
+       type 0x0C, start 0). PartitionDxe then treats the volume as a partitioned
+       disk, creates a bogus child device and takes the parent's DiskIo with
+       EFI_OPEN_PROTOCOL_BY_DRIVER, so EnhancedFatDxe can never bind to the real
+       volume and the boot manager sees no file system at all.
+
+    Neither field is used to mount a volume, so both are rewritten.
     """
     if len(ramdisk) < 512:
         return ramdisk, "too small"
-    bps = int.from_bytes(ramdisk[11:13], "little")
-    fatsz16 = int.from_bytes(ramdisk[22:24], "little")
-    total16 = int.from_bytes(ramdisk[19:21], "little")
-    total32 = int.from_bytes(ramdisk[32:36], "little")
-    fstype = bytes(ramdisk[82:90])
-    if bps == 0 or fatsz16 != 0 or b"FAT32" not in fstype:
-        return ramdisk, "not FAT32"
-    if total32 != 0 or total16 == 0:
-        return ramdisk, "already consistent"
+
     fixed = bytearray(ramdisk)
-    fixed[19:21] = b"\x00\x00"
-    fixed[32:36] = total16.to_bytes(4, "little")
-    return bytes(fixed), "moved %d sectors to TotSec32" % total16
+    notes = []
+
+    if fixed[446:510] != b"\x00" * 64:
+        fixed[446:510] = b"\x00" * 64
+        notes.append("cleared the fake MBR partition table")
+
+    bps = int.from_bytes(fixed[11:13], "little")
+    fatsz16 = int.from_bytes(fixed[22:24], "little")
+    total16 = int.from_bytes(fixed[19:21], "little")
+    total32 = int.from_bytes(fixed[32:36], "little")
+    fstype = bytes(fixed[82:90])
+    if bps == 0 or fatsz16 != 0 or b"FAT32" not in fstype:
+        notes.append("not FAT32, BPB left alone")
+    elif total32 == 0 and total16 != 0:
+        fixed[19:21] = b"\x00\x00"
+        fixed[32:36] = total16.to_bytes(4, "little")
+        notes.append("moved %d sectors to TotSec32" % total16)
+
+    return bytes(fixed), ", ".join(notes) or "already clean"
 
 
 def make_image(uefi, device, target, dtb_path, output, fd_override, shim_override, ramdisk_override=None,
