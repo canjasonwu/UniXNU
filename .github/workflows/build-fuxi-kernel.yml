@@ -108,16 +108,11 @@ jobs:
       - name: fetch sources
         run: python3 ./unixnu fetch
 
-      - name: pre-build the kernel archives
-        run: |
-          # The kernel script runs as a bootstrap pass before unixnu builds the
-          # board's archives, and it stops at `test -f <archive>` before it has
-          # compiled anything on a clean checkout. Build them first so the pass
-          # can produce the compile records; failures here are expected for the
-          # builders that need those records and are retried later by unixnu.
-          python3 scripts/prebuild-kernel-archives.py 2>&1 | tee prebuild.log
-
       - name: build kernel
+        env:
+          # prepare-xnu-source.py reads the GitHub contents API; without a token the
+          # shared runner IP hits the anonymous rate limit and the step fails with 403.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           python3 ./unixnu build kernel 2>&1 | tee kernel-build.log
