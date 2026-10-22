@@ -402,6 +402,7 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
 
 STATIC BOOLEAN  mFatPublished  = FALSE;
 STATIC EFI_STATUS  mPublishStatus = EFI_NOT_READY;
+STATIC EFI_HANDLE  mDeviceHandle = NULL;
 
 STATIC
 BOOLEAN
@@ -562,6 +563,7 @@ PublishInitrd (
                   NULL
                   );
   mPublishStatus = Status;
+  mDeviceHandle  = Handle;
   mFatPublished  = (BOOLEAN)!EFI_ERROR (Status);
   DEBUG ((DEBUG_ERROR, "FUXIMEM: initrd block device 0x%lx size 0x%lx %r\n", Start, End - Start, Status));
 }
@@ -616,6 +618,15 @@ FuxiBootMemoryDxeEntry (
     UINTN       BlockCount = 0;
     UINTN       FsCount    = 0;
     UINTN       Delay;
+
+    //
+    // Bind every driver that can attach to the new device right now. The driver
+    // entry point runs inside the DXE dispatch, and relying on the binding
+    // notification alone has not produced a filesystem on this board.
+    //
+    if (!EFI_ERROR (mPublishStatus)) {
+      gBS->ConnectController (mDeviceHandle, NULL, NULL, TRUE);
+    }
 
     if (!EFI_ERROR (gBS->LocateHandleBuffer (ByProtocol, &gEfiBlockIoProtocolGuid, NULL, &Count, &Handles))) {
       BlockCount = Count;
