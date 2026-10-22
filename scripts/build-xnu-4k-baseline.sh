@@ -728,9 +728,18 @@ python3 - "${XNU_NATIVE_AES:-0}" "${XNU_NATIVE_AES_ARCHIVE:-$ROOT/build/native-a
 import hashlib
 from pathlib import Path
 import sys
+
+
+def digest(archive):
+    # The bootstrap pass runs before the archives exist; a missing input is part of
+    # the identity then, so the stamp still changes once they appear.
+    path = Path(archive)
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else 'missing'
+
+
 directory = Path('build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837')
 stamp = directory / '.native-aes-link-input'
-identity = '|'.join(mode + ':' + (hashlib.sha256(Path(archive).read_bytes()).hexdigest() if mode == '1' else 'disabled')
+identity = '|'.join(mode + ':' + (digest(archive) if mode == '1' else 'disabled')
                     for mode, archive in zip(sys.argv[1::2], sys.argv[2::2]))
 if not stamp.exists() or stamp.read_text() != identity:
     # Make does not track selection of an older alternative external archive.
