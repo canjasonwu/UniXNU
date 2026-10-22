@@ -198,11 +198,13 @@ kernel_args = [
   "kt_fixed_zones=120",
   "boot-progress=2",
   "-apfs_shared_datavolume",
-  "native-ufs-root=1",
   "armcpu-diagnostics=1",
   "-no_slto_panic",
 ]
 # Dropped on purpose, each needs a fuxi implementation first:
+#   native-ufs-root=1  (needs the PMGR integration: without it AMFI panics on No PMGR;
+#                       the payload step refuses the combination, which is how this
+#                       was found)
 #   sheng-pmgr=2, sheng-touch=4, sheng-gpu-*, sheng-smp, sheng-cpufreq,
 #   offline-* (the whole offline bring-up ladder), boot-ui-focus*,
 #   sheng-disable-jobs, sheng-data-persist
