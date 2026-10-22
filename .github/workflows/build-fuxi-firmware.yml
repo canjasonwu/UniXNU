@@ -195,6 +195,53 @@ jobs:
           PY
           grep -n 'CHK' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
 
+      - name: Instrument a read/write test on the two buffers
+        run: |
+          # Every decoder variant decodes this payload correctly on the host,
+          # including the exact firmware defines on AArch64. The remaining
+          # suspect is the memory the device hands out: LZMA writes history and
+          # reads it back, so a buffer that does not retain what was written
+          # yields SZ_ERROR_DATA part way through.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
+          t = p.read_text(encoding="utf-8")
+          anchor = "      DstBuffer = (UINT8 *)DstBuffer + EFI_PAGE_SIZE - SectionHeaderSize;"
+          if anchor not in t:
+              sys.exit("DstBuffer anchor not found")
+          probe = "".join([
+            "\n",
+            "      {\n",
+            "        UINTN  K;\n",
+            "        UINTN  DOk = 1;\n",
+            "        UINTN  SOk = 1;\n",
+            "\n",
+            "        for (K = 0; K < 8; K++) {\n",
+            "          UINTN  Off = (K * (UINTN)DstBufferSize) / 8;\n",
+            "          volatile UINT32  *Slot = (volatile UINT32 *)((UINT8 *)DstBuffer + (Off & ~(UINTN)3));\n",
+            "          *Slot = 0x5A5A0000 + (UINT32)K;\n",
+            "          if (*Slot != 0x5A5A0000 + (UINT32)K) {\n",
+            "            DOk = 0;\n",
+            "          }\n",
+            "        }\n",
+            "        for (K = 0; K < 4; K++) {\n",
+            "          UINTN  Off = (K * (UINTN)ScratchBufferSize) / 4;\n",
+            "          volatile UINT32  *Slot = (volatile UINT32 *)((UINT8 *)ScratchBuffer + (Off & ~(UINTN)3));\n",
+            '          *Slot = 0xA5A50000 + (UINT32)K;\n',
+            '          if (*Slot != 0xA5A50000 + (UINT32)K) {\n',
+            "            SOk = 0;\n",
+            "          }\n",
+            "        }\n",
+            '        DEBUG ((DEBUG_ERROR, "MEM dst=%d scr=%d\\n", DOk, SOk));\n',
+            "      }\n",
+          ])
+          t = t.replace(anchor, anchor + probe, 1)
+          p.write_text(t, encoding="utf-8")
+          print("memory probe inserted")
+          PY
+          grep -n 'MEM dst' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
+
       - name: Raise the LZMA scratch budget above the dictionary size
         run: |
           # SCRATCH_BUFFER_REQUEST_SIZE is a hard 64 KiB and SzAlloc is a bump
