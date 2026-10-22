@@ -599,12 +599,17 @@ FuxiBootMemoryDxeEntry (
   //   no FAT volume        -> hold the CPU, the phone stays on the panel
   //
 #if FUXI_REPORT_RESULT
+  //
+  // Always reset, and encode the result in how long the boot takes: the host
+  // measures from "fastboot boot" to adb answering. Holding the CPU would report
+  // just as well, but then nothing can bring the phone back except a human.
+  //
   if (mFatPublished) {
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=found, resetting\n"));
-    gBS->Stall (2 * 1000 * 1000);
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=found, resetting after 5s\n"));
+    gBS->Stall (5 * 1000 * 1000);
   } else {
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=missing, holding\n"));
-    CpuDeadLoop ();
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=missing, resetting after 45s\n"));
+    gBS->Stall (45 * 1000 * 1000);
   }
 
   __asm__ __volatile__ (
