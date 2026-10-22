@@ -108,20 +108,6 @@ jobs:
       - name: fetch sources
         run: python3 ./unixnu fetch
 
-      - name: Restore the kernel build tree
-        # The kernel script needs the compile records of osfmk/iokit before it can
-        # build the archives, and it can only produce them by compiling, which the
-        # script stops before doing when the archives are absent. Carry the tree
-        # across runs so a later run starts with the records an earlier one made.
-        uses: actions/cache@v4
-        with:
-          path: |
-            out/fuxi/tree/build/xnu
-            out/fuxi/tree/.cache/fakeroot
-          key: fuxi-xnu-tree-v1-${{ hashFiles('devices/fuxi/configs/fuxi_defconfig') }}
-          restore-keys: |
-            fuxi-xnu-tree-v1-
-
       - name: build kernel
         env:
           # prepare-xnu-source.py reads the GitHub contents API; without a token the
@@ -129,6 +115,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
+          # Two passes over the same tree. The first one compiles XNU and stops at
+          # the link because the board archives do not exist yet; it exists to leave
+          # the compile records the archive builders read. The second pass finds
+          # them, builds the archives and links the kernel. Everything stays in the
+          # job workspace, so no cache is involved.
+          echo '=== pass 1: compile records ==='
+          python3 ./unixnu build kernel 2>&1 | tee kernel-build-pass1.log || true
+          echo '=== pass 2: archives and link ==='
           python3 ./unixnu build kernel 2>&1 | tee kernel-build.log
 
       - name: build payload volume
@@ -173,6 +167,7 @@ jobs:
             out/fuxi/payload/payload.json
             out/fuxi/boot/boot.img
             kernel-build.log
+            kernel-build-pass1.log
             prebuild.log
             payload.log
             firmware-build.log
