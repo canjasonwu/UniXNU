@@ -44,7 +44,7 @@ def toolchain_path():
     return os.pathsep.join(extra + [os.environ.get('PATH', '')])
 
 
-def build_archives(ctx, env):
+def build_archives(ctx, env, required=True):
     """Run the board's archive builders ([kernel] archives of board.toml), in order, then check the prebuilt archives.
 
     Each entry is a script of the build tree with its arguments. The kernel link needs their archives, and some of
@@ -56,9 +56,19 @@ def build_archives(ctx, env):
         parts = shlex.split(entry)
         script = ctx.tree / 'scripts' / parts[0]
         if not script.is_file():
+            if not required:
+                log(f'kernel: archive {index}/{len(entries)}: {parts[0]} missing, skipped')
+                continue
             raise Error(f'[kernel] archives: {script} missing')
         log(f'kernel: archive {index}/{len(entries)}: {entry}')
-        run(['python3', script, *parts[1:]], cwd=ctx.tree, env=env, log_file=ctx.logs / f'archive-{index:02d}-{Path(parts[0]).stem}.log')
+        try:
+            run(['python3', script, *parts[1:]], cwd=ctx.tree, env=env, log_file=ctx.logs / f'archive-{index:02d}-{Path(parts[0]).stem}.log')
+        except Error:
+            if required:
+                raise
+            log(f'kernel: archive {index}/{len(entries)} failed, tolerated before the bootstrap pass')
+    if not required:
+        return
     # Archives that no builder produces (they need inputs outside the repositories) must be supplied.
     for key, value in sorted(xnu_env(ctx).items()):
         if key.endswith('_ARCHIVE') and value.endswith('.a') and not Path(value).is_file():
@@ -77,6 +87,11 @@ def build(ctx, modules):
     env.update(xnu_env(ctx))
     env.update(version_env(modules))
     env['JOBS'] = str(ctx.jobs)
+    # The legacy script checks `test -f <archive>` before it compiles anything, so on a
+    # clean checkout the bootstrap pass can never produce the compile records it exists
+    # for. Build what the builders can make without those records first; the ones that
+    # need them fail here quietly and are retried after the pass.
+    build_archives(ctx, env, required=False)
     record = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json'
     if not record.is_file():
         # The archive builders and the boot progress layer read compile records of the XNU build, which only an earlier
