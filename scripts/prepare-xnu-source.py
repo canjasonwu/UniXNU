@@ -67,7 +67,7 @@ if __name__ == '__main__':
         if not trust_cache.exists():
             url = ('https://api.github.com/repos/apple-oss-distributions/xnu/'
                    f'contents/EXTERNAL_HEADERS/TrustCache?ref={trust_tag}')
-            trust_cache.write_bytes(urllib.request.urlopen(url, timeout=30).read())
+            trust_cache.write_bytes(fetch(url))
         trust_destination = Path('.cache/xnu-work/EXTERNAL_HEADERS/TrustCache')
         def restore_trust(entry):
             return restore(entry, trust_destination, trust_tag)
