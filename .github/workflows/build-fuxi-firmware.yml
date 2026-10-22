@@ -3,15 +3,25 @@
 # Target location in the fork: .github/workflows/build-fuxi-firmware.yml
 # Device description expected at: devices/fuxi/  (board.toml, configs/, uefi-config/)
 #
-# What this produces: SILICIUM_UEFI.fd, the firmware volume that bootimg needs.
-# It does not build a kernel, a payload or a userdata image.
+# What this produces: SILICIUM_UEFI.fd, the firmware volume that bootimg needs,
+# and boot.img. It does not build a kernel, a payload or a userdata image.
 #
-# Known constraints baked into the steps below:
+# Two patches are applied to the Mu-Silicium checkout before the build. Both are
+# real defects in that tree for this board, not build workarounds:
+#
+#   1. MemoryMapLib describes sheng's FD window (0xA7100000, 3 MiB). This device's
+#      own uefiplatLA.cfg says 0xA7000000, 4 MiB, and SEC maps memory from the
+#      table, so the two have to agree.
+#   2. BootShim copies the firmware volume with the MMU off and then cleans the
+#      destination cache without ever invalidating it. On a warm reboot a stale
+#      dirty line gets written back over the freshly copied bytes; because FVMAIN
+#      is an LZMA stream, one wrong byte makes SEC report "Decompress Failed -
+#      Invalid Parameter" and stop. Invalidating [FD_BASE, FD_BASE+FD_SIZE)
+#      before the copy fixes it; verified on hardware 2026-10-22.
+#
+# Constraints baked into the steps below:
 #   * fuxi.dsc pulls KailuaPkg through PACKAGES_PATH ({uefi}/Silicon/Qualcomm), so
 #     the uefi checkout must include that tree, not just Platforms/Xiaomi.
-#   * The upstream Resources/Configs/fuxi.toml carries sheng's FD addresses. The
-#     corrected file from devices/fuxi/uefi-config/ is copied over it before the
-#     build, and the step fails loudly if the copy did not land.
 #   * EDK II needs the Mu pip requirements; without them the build stops on an
 #     import error that looks unrelated to the packaging.
 #   * The firmware volume must be exactly 0x400000 bytes; the FDF gets FD_BASE /
@@ -21,6 +31,10 @@ name: build fuxi firmware
 
 on:
   workflow_dispatch:
+    inputs:
+      watchdog_seconds:
+        description: 'reset the device after N seconds (0 = no watchdog); used for unattended test loops'
+        default: '0'
   push:
     paths:
       - 'devices/fuxi/**'
@@ -53,27 +67,16 @@ jobs:
           test -d uefi-fuxi/Silicon/Qualcomm/KailuaPkg
           test -f uefi-fuxi/Silicon/Qualcomm/KailuaPkg/KailuaPkg.dsc.inc
           test -d uefi-fuxi/Mu_Basecore
-          echo "fuxi.dsc includes:"
-          grep -n 'KailuaPkg' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
-          echo "FDF memory layout:"
-          grep -n 'FD_BASE\|FD_SIZE\|FD_BLOCKS' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
 
       - name: Apply the corrected device config
         run: |
           set -e
           cp devices/fuxi/uefi-config/fuxi.toml uefi-fuxi/Resources/Configs/fuxi.toml
-          echo "applied FD window:"
-          grep -E '^(base|size|header_version)' uefi-fuxi/Resources/Configs/fuxi.toml
           grep -q '0xA7000000' uefi-fuxi/Resources/Configs/fuxi.toml
           grep -q '0x400000' uefi-fuxi/Resources/Configs/fuxi.toml
 
       - name: Fix the fuxi FD rows to match uefiplatLA.cfg
         run: |
-          # MemoryMapLib still describes sheng's layout (FD at 0xA7100000, 3 MiB).
-          # This device's own uefiplatLA.cfg says 0xA7000000, 0x00400000. SEC maps
-          # memory from this table, so a mismatch between the described FD window
-          # and the real one breaks the FVMAIN_COMPACT decompression
-          # ("Decompress Failed - Invalid Parameter" on the panel).
           python3 - <<'PY'
           import re, sys
           from pathlib import Path
@@ -91,242 +94,8 @@ jobs:
           PY
           grep -n 'UEFI FD' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c
 
-      - name: Instrument PrePiLib FV decompression
-        run: |
-          # Two short DEBUG lines only, so the panel stays readable:
-          #   PRB  : destination size, scratch size, section type, DataOffset
-          #   PRB2 : first four bytes of the source the decoder is handed
-          # A correct run must show dst=52b008, type=2, dofs=18 and PRB2 5d 00 00 00.
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = "      ScratchBuffer = (VOID *)(UINTN)AllocatePages (EFI_SIZE_TO_PAGES (ScratchBufferSize));"
-          if anchor not in t:
-              sys.exit("anchor not found in FwVol.c")
-          probe = (
-            '      DEBUG ((DEBUG_ERROR, "PRB dst=%x scr=%x type=%x dofs=%x\\n",'
-            ' (UINTN)DstBufferSize, (UINTN)ScratchBufferSize, (UINTN)Section->Type,'
-            ' (UINTN)((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset));\n'
-            '      DEBUG ((DEBUG_ERROR, "PRB2 %02x %02x %02x %02x\\n",\n'
-            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset),\n'
-            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset + 1),\n'
-            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset + 2),\n'
-            '        *((UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset + 3)));\n'
-          )
-          t = t.replace(anchor, probe + anchor, 1)
-          p.write_text(t, encoding="utf-8")
-          print("instrumented", p)
-          PY
-          grep -n 'PRB' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
-
-      - name: Instrument the LZMA decoder result
-        run: |
-          # One extra line: LZR res=<SRes> st=<ELzmaStatus> dlen=<dest> elen=<src>
-          #   SZ_OK=0  SZ_ERROR_DATA=1  SZ_ERROR_MEM=2  SZ_ERROR_CRC=3  SZ_ERROR_UNSUPPORTED=4  SZ_ERROR_PARAM=5
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = "  if (LzmaResult == SZ_OK) {"
-          if anchor not in t:
-              sys.exit("anchor not found in LzmaDecompress.c")
-          probe = (
-            '  DEBUG ((DEBUG_ERROR, "LZR res=%d st=%d dlen=%x elen=%x\\n",\n'
-            '    (UINTN)LzmaResult, (UINTN)Status, (UINTN)DecodedBufSize, (UINTN)EncodedDataSize));\n'
-          )
-          t = t.replace(anchor, probe + anchor, 1)
-          p.write_text(t, encoding="utf-8")
-          print("instrumented", p)
-          PY
-          grep -n 'LZR' uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c
-
-      - name: Instrument the buffer addresses
-        run: |
-          # Third line: ADR dst=<dest buffer> sec=<section> scr=<scratch>
-          # If [dst, dst+dlen) overlaps [sec+DataOffset, +981k) the decoder is
-          # writing over its own input, which shows up as SZ_ERROR_DATA halfway.
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = "      DstBuffer = (UINT8 *)DstBuffer + EFI_PAGE_SIZE - SectionHeaderSize;"
-          if anchor not in t:
-              sys.exit("DstBuffer anchor not found")
-          probe = (
-            '      DEBUG ((DEBUG_ERROR, "ADR dst=%x sec=%x scr=%x\\n",\n'
-            '        (UINTN)DstBuffer, (UINTN)Section, (UINTN)ScratchBuffer));\n'
-          )
-          t = t.replace(anchor, anchor + "\n" + probe, 1)
-          p.write_text(t, encoding="utf-8")
-          print("instrumented", p)
-          PY
-          grep -n 'ADR' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
-
-      - name: Instrument a checksum of the compressed stream in memory
-        run: |
-          # Everything else has been ruled out except "is the compressed data the
-          # decoder sees really the data we built". Four 32-bit words sampled from
-          # the payload, compared against the same offsets in the .fd offline.
-          # Match -> the copy is intact and the decoder is at fault.
-          # Differ -> the image or the mapping corrupts the FV and nothing else matters.
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = "      ScratchBuffer = (VOID *)(UINTN)AllocatePages (EFI_SIZE_TO_PAGES (ScratchBufferSize));"
-          if anchor not in t:
-              sys.exit("anchor not found")
-          d = "((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset"
-          probe = (
-            '      DEBUG ((DEBUG_ERROR, "CHK %x %x %x %x\\n",\n'
-            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0x1000),\n'
-            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0x40000),\n'
-            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0x80000),\n'
-            '        *(UINT32 *)((UINT8 *)Section + ' + d + ' + 0xC0000)));\n'
-          )
-          t = t.replace(anchor, probe + anchor, 1)
-          p.write_text(t, encoding="utf-8")
-          print("checksum probe inserted")
-          PY
-          grep -n 'CHK' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
-
-      - name: Instrument a read/write test on the two buffers
-        run: |
-          # Every decoder variant decodes this payload correctly on the host,
-          # including the exact firmware defines on AArch64. The remaining
-          # suspect is the memory the device hands out: LZMA writes history and
-          # reads it back, so a buffer that does not retain what was written
-          # yields SZ_ERROR_DATA part way through.
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = "      DstBuffer = (UINT8 *)DstBuffer + EFI_PAGE_SIZE - SectionHeaderSize;"
-          if anchor not in t:
-              sys.exit("DstBuffer anchor not found")
-          probe = "".join([
-            "\n",
-            "      {\n",
-            "        UINTN  K;\n",
-            "        UINTN  DOk = 1;\n",
-            "        UINTN  SOk = 1;\n",
-            "\n",
-            "        for (K = 0; K < 8; K++) {\n",
-            "          UINTN  Off = (K * (UINTN)DstBufferSize) / 8;\n",
-            "          volatile UINT32  *Slot = (volatile UINT32 *)((UINT8 *)DstBuffer + (Off & ~(UINTN)3));\n",
-            "          *Slot = 0x5A5A0000 + (UINT32)K;\n",
-            "          if (*Slot != 0x5A5A0000 + (UINT32)K) {\n",
-            "            DOk = 0;\n",
-            "          }\n",
-            "        }\n",
-            "        for (K = 0; K < 4; K++) {\n",
-            "          UINTN  Off = (K * (UINTN)ScratchBufferSize) / 4;\n",
-            "          volatile UINT32  *Slot = (volatile UINT32 *)((UINT8 *)ScratchBuffer + (Off & ~(UINTN)3));\n",
-            '          *Slot = 0xA5A50000 + (UINT32)K;\n',
-            '          if (*Slot != 0xA5A50000 + (UINT32)K) {\n',
-            "            SOk = 0;\n",
-            "          }\n",
-            "        }\n",
-            '        DEBUG ((DEBUG_ERROR, "MEM dst=%d scr=%d\\n", DOk, SOk));\n',
-            "      }\n",
-          ])
-          t = t.replace(anchor, anchor + probe, 1)
-          p.write_text(t, encoding="utf-8")
-          print("memory probe inserted")
-          PY
-          grep -n 'MEM dst' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
-
-      - name: Instrument a checksum before the decode
-        run: |
-          # SUM is currently computed only after the decode failed, so a mismatch
-          # cannot distinguish "the source was already wrong" from "the decoder
-          # damaged its own input". Take the same checksum immediately before the
-          # decode call as SUM1 and compare it with the offline value.
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = "      if (Section->Type == EFI_SECTION_COMPRESSION) {"
-          if anchor not in t:
-              sys.exit("decode dispatch anchor not found")
-          probe = "".join([
-            "      {\n",
-            "        UINT8  *TS = (UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
-            "        UINTN   TN = GetSectionNSize (Section) - ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
-            "        UINT32  TSum = 0;\n",
-            "        UINTN   TI;\n",
-            "\n",
-            "        for (TI = 0; TI < TN; TI++) {\n",
-            "          TSum = (TSum * 31) + TS[TI];\n",
-            "        }\n",
-            '        DEBUG ((DEBUG_ERROR, "SUM1 %x n=%x\\n", TSum, TN));\n',
-            "      }\n",
-          ])
-          t = t.replace(anchor, probe + anchor, 1)
-          p.write_text(t, encoding="utf-8")
-          print("pre-decode checksum inserted")
-          PY
-          grep -n 'SUM1' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
-
-      - name: Instrument payload checksum and a second decode attempt
-        run: |
-          # The four sampled words only cover 4 KB, 256 KB, 512 KB and 768 KB of
-          # the payload, but decoding stops around 93 KB of input, which falls
-          # between samples. Print a checksum over the whole payload (host
-          # computes the same) and retry the decode into a different buffer, so
-          # "data is wrong" and "that buffer is wrong" can be told apart.
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = '        DEBUG ((DEBUG_ERROR, "Decompress Failed - %r\\n", Status));\n        return EFI_NOT_FOUND;'
-          if anchor not in t:
-              sys.exit("failure print anchor not found")
-          probe = "".join([
-            '        DEBUG ((DEBUG_ERROR, "Decompress Failed - %r\\n", Status));\n',
-            "        {\n",
-            "          extern RETURN_STATUS EFIAPI LzmaUefiDecompress (IN CONST VOID *, IN UINTN, IN OUT VOID *, IN OUT VOID *);\n",
-            "          UINT8          *S = (UINT8 *)Section + ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
-            "          UINTN           N = GetSectionNSize (Section) - ((EFI_GUID_DEFINED_SECTION *)Section)->DataOffset;\n",
-            "          UINT32          Sum = 0;\n",
-            "          UINTN           I;\n",
-            "          RETURN_STATUS   St2;\n",
-            "\n",
-            "          for (I = 0; I < N; I++) {\n",
-            "            Sum = (Sum * 31) + S[I];\n",
-            "          }\n",
-            '          DEBUG ((DEBUG_ERROR, "SUM2 %x n=%x\\n", Sum, N));\n',
-            "          St2 = LzmaUefiDecompress (S, N, ScratchBuffer, (UINT8 *)ScratchBuffer + 0x530000);\n",
-            '          DEBUG ((DEBUG_ERROR, "DEC2 %r\\n", St2));\n',
-            "        }\n",
-            "        return EFI_NOT_FOUND;",
-          ])
-          t = t.replace(anchor, probe, 1)
-          p.write_text(t, encoding="utf-8")
-          print("checksum and retry probes inserted")
-          PY
-          grep -n 'SUM %x\|DEC2' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
-
       - name: Fix BootShim so the destination cache is invalidated before the copy
         run: |
-          # BootShim copies the firmware volume with the MMU off and then runs
-          #   dc cvac   (clean)
-          # over the whole destination. It never invalidates the destination
-          # range, so on a warm reboot any stale dirty line left over from the
-          # previous boot is written back over the freshly copied bytes. That
-          # corrupts scattered bytes of the FV -- and because FVMAIN is an LZMA
-          # stream, a single wrong byte makes the decoder report SZ_ERROR_DATA
-          # part way through, which is exactly what the panel shows.
-          #
-          # Invalidate [FD_BASE, FD_BASE + FD_SIZE) before the copy loop.
           python3 - <<'PY'
           import sys
           from pathlib import Path
@@ -360,86 +129,48 @@ jobs:
           PY
           grep -n -A3 '_InvalLoop' uefi-fuxi/BootShim/BootShim.S
 
-      - name: Reset the device when FV decompression fails
+      - name: Install the test watchdog driver
+        if: ${{ inputs.watchdog_seconds != '' && inputs.watchdog_seconds != '0' }}
+        env:
+          WATCHDOG_SECONDS: ${{ inputs.watchdog_seconds }}
         run: |
-          # A failed boot leaves the panel showing the SEC log and the phone
-          # completely unreachable, so every experiment needs a manual power
-          # cycle. Reset through PSCI SYSTEM_RESET (0x84000009) instead: the
-          # phone reboots to Android on its own, adb can take it back to the
-          # bootloader, and the whole test loop becomes hands free.
+          set -e
+          driver=uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiWatchdog
+          mkdir -p "$driver"
+          cp devices/fuxi/watchdog/FuxiWatchdog.inf "$driver/"
+          ticks=$(( WATCHDOG_SECONDS * 10000000 ))
+          sed "s|^#define WD_TICKS .*|#define WD_TICKS  ${ticks}ULL|" \
+            devices/fuxi/watchdog/FuxiWatchdog.c > "$driver/FuxiWatchdog.c"
+          grep -n 'WD_TICKS' "$driver/FuxiWatchdog.c" | head -2
           python3 - <<'PY'
           import sys
           from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c")
-          t = p.read_text(encoding="utf-8")
-          anchor = "        return EFI_NOT_FOUND;\n      }\n\n      return FfsProcessSection ("
+          fdf = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
+          t = fdf.read_text(encoding="utf-8")
+          anchor = "  !include QcomPkg/Extra.fdf.inc"
           if anchor not in t:
-              sys.exit("failure return anchor not found")
-          reset = "".join([
-            '        DEBUG ((DEBUG_ERROR, "RESETTING\\n"));\n',
-            "        __asm__ __volatile__ (\n",
-            '          "movz x0, #0x0009\\n"\n',
-            '          "movk x0, #0x8400, lsl #16\\n"\n',
-            '          "mov  x1, #0\\n"\n',
-            '          "mov  x2, #0\\n"\n',
-            '          "mov  x3, #0\\n"\n',
-            '          "smc  #0\\n"\n',
-            '          ::: "x0", "x1", "x2", "x3", "memory");\n',
-            "        return EFI_NOT_FOUND;\n",
-            "      }\n\n      return FfsProcessSection (",
-          ])
-          t = t.replace(anchor, reset, 1)
-          p.write_text(t, encoding="utf-8")
-          print("PSCI reset inserted")
+              sys.exit("FDF anchor not found")
+          if "FuxiWatchdog" not in t:
+              t = t.replace(anchor, "  INF fuxiPkg/Drivers/FuxiWatchdog/FuxiWatchdog.inf\n\n" + anchor, 1)
+              fdf.write_text(t, encoding="utf-8")
+          print("FDF updated")
           PY
-          grep -n 'RESETTING' uefi-fuxi/Mu_Basecore/EmbeddedPkg/Library/PrePiLib/FwVol.c
-
-      - name: Raise the LZMA scratch budget above the dictionary size
-        run: |
-          # SCRATCH_BUFFER_REQUEST_SIZE is a hard 64 KiB and SzAlloc is a bump
-          # allocator over exactly that buffer. Our stream declares a 16 MiB
-          # dictionary, so any dictionary window the decoder asks for cannot fit
-          # and SzAlloc returns NULL (SZ_ERROR_MEM), which the callers then report
-          # as INVALID_PARAMETER. 17 MiB covers the dictionary plus the ~16 KiB of
-          # probability tables. PrePiLib allocates whatever GetInfo asks for.
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path("uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c")
-          t = p.read_text(encoding="utf-8")
-          old = "#define SCRATCH_BUFFER_REQUEST_SIZE  SIZE_64KB"
-          if old not in t:
-              sys.exit("scratch size define not found")
-          t = t.replace(old, "#define SCRATCH_BUFFER_REQUEST_SIZE  (SIZE_1MB * 17)", 1)
-          p.write_text(t, encoding="utf-8")
-          print("scratch budget raised to 17 MiB")
-          PY
-          grep -n 'SCRATCH_BUFFER_REQUEST_SIZE' uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/LzmaDecompress.c
+          grep -n 'FuxiWatchdog' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
 
       - name: Install host tools
         run: |
           sudo apt-get update
-          # uuid-dev: BaseTools GenFv/GenFw need uuid/uuid.h and -luuid.
-          # llvm: EDK II's CLANGPDB toolchain needs llvm-lib and llvm-rc, which
-          #       the plain clang package does not pull in.
           sudo apt-get install -y --no-install-recommends \
             clang lld llvm make python3 python3-pip device-tree-compiler uuid-dev
           test -f /usr/include/uuid/uuid.h
-          # CLANGPDB looks for clang, lld-link, llvm-lib, llvm-rc under these
-          # exact names. Ubuntu ships some of them only in /usr/lib/llvm-N/bin,
-          # so link the unversioned names into /usr/local/bin.
           for v in /usr/lib/llvm-*/bin; do echo "$v" >> "$GITHUB_PATH"; done
           for t in clang lld-link llvm-lib llvm-rc llvm-objcopy llvm-nm llvm-ar; do
             if ! command -v "$t" >/dev/null 2>&1; then
               cand=$(ls /usr/lib/llvm-*/bin/"$t" 2>/dev/null | head -1 || true)
               if [ -n "$cand" ]; then sudo ln -sf "$cand" "/usr/local/bin/$t"; fi
             fi
-            printf '%-14s %s\n' "$t" "$(command -v "$t" || echo MISSING)"
           done
-          command -v clang >/dev/null
-          command -v lld-link >/dev/null
-          command -v llvm-lib >/dev/null
-          command -v llvm-rc >/dev/null
+          command -v clang && command -v lld-link && command -v llvm-lib && command -v llvm-rc
 
       - name: Install Mu pip requirements
         run: |
@@ -454,7 +185,6 @@ jobs:
 
       - name: build firmware
         run: |
-          # pipefail, otherwise the pipe to tee masks a non-zero exit of unixnu.
           set -o pipefail
           python3 ./unixnu build firmware \
             --uefi uefi-fuxi \
@@ -463,13 +193,11 @@ jobs:
 
       - name: make boot image
         run: |
-          # v3 header: android boot image v3 carries no load addresses. unixnu
-          # bootimg only verifies a v0 header, so the image is built here with the
-          # uefi checkout's own mkbootimg.py instead.
           set -o pipefail
           mkdir -p out/fuxi/boot
           python3 devices/fuxi/make-bootimg.py \
             --uefi uefi-fuxi \
+            --target DEBUG \
             --dtb devices/fuxi/fuxi-live.dtb \
             --output out/fuxi/boot/boot.img 2>&1 | tee bootimg.log
           ls -l out/fuxi/boot/boot.img
@@ -477,11 +205,10 @@ jobs:
       - name: Check the firmware volume size
         if: always()
         run: |
-          fv=$(find uefi-fuxi/Build/fuxiPkg -path '*/FV/SILICIUM_UEFI.fd' | head -1)
+          fv=$(find uefi-fuxi/Build/fuxiPkg -path '*DEBUG*/FV/SILICIUM_UEFI.fd' | head -1)
           if [ -n "$fv" ]; then
             size=$(stat -c %s "$fv")
-            echo "firmware volume: $fv ($size bytes)"
-            echo "expected: 4194304 bytes (0x400000)"
+            echo "firmware volume: $fv ($size bytes), expected 4194304"
             test "$size" -eq 4194304
           else
             echo "no firmware volume produced"
@@ -497,7 +224,6 @@ jobs:
           path: |
             uefi-fuxi/Build/fuxiPkg/**/FV/*.fd
             out/fuxi/boot/boot.img
-            out/fuxi/boot/boot.kernel
             bootimg.log
             firmware-build.log
             out/fuxi/logs/**
