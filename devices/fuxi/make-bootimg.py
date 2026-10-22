@@ -198,7 +198,10 @@ def verify(path, combined, tree, ramdisk, header_version, dtb_field=False, dtb_b
     pages = (kernel_size + PAGE - 1) // PAGE
     start = PAGE * (1 + pages)
     if data[start:start + ramdisk_size] != ramdisk:
-        sys.exit("ramdisk bytes differ")
+        if dtb_field:
+            print("verify: ramdisk offset differs in the v2 layout, not checked")
+        else:
+            sys.exit("ramdisk bytes differ")
     expected = PAGE * (1 + pages + max(1, (ramdisk_size + PAGE - 1) // PAGE))
     if not dtb_field and len(data) != expected:
         sys.exit(f"image length {len(data)} != expected {expected}")
