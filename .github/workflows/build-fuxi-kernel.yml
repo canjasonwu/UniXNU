@@ -1,0 +1,147 @@
+# Build the fuxi XNU kernel, prelink it and pack it into the payload volume.
+#
+# This is the one stage that cannot run on Linux: the kernel step uses the Xcode
+# iphoneos SDK and the prelink step uses compression_tool. GitHub's macos runners
+# carry both, so no local Mac is needed.
+#
+# Status: first attempt. The device half of the platform code is a baseline
+# copied from UniXNU-sheng (devices/fuxi/package/) and the archive builders were
+# pointed at kits/fuxi; expect this to fail at the first step that is genuinely
+# sheng-specific and to be iterated from there.
+#
+# Target location in the fork: .github/workflows/build-fuxi-kernel.yml
+
+name: build fuxi kernel and payload
+
+on:
+  workflow_dispatch:
+    inputs:
+      chip_id:
+        description: 'unique-chip-id seed (8 bytes hex); the ADT needs it, the value is device specific'
+        default: '0x1234567890abcdef'
+
+jobs:
+  kernel:
+    runs-on: macos-14
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout UniXNU fork with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout uefi-fuxi (fuxi branch)
+        uses: actions/checkout@v4
+        with:
+          repository: hanzi123-bilp/uefi-fuxi
+          ref: fuxi
+          path: uefi-fuxi
+          submodules: recursive
+
+      - name: Apply the corrected device config
+        run: |
+          set -e
+          cp devices/fuxi/uefi-config/fuxi.toml uefi-fuxi/Resources/Configs/fuxi.toml
+          grep -q '0xA7000000' uefi-fuxi/Resources/Configs/fuxi.toml
+
+      - name: Fix the fuxi FD rows and BootShim
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          mm = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Library/MemoryMapLib/MemoryMapLib.c")
+          t = mm.read_text(encoding="utf-8")
+          before = t
+          t = re.sub(r'[ \t]*\{"FD Reserved".*?\},\r?\n', '', t)
+          t = re.sub(r'("UEFI FD",\s*)0xA7100000,\s*0x00300000', r'\g<1>0xA7000000, 0x00400000', t)
+          if t == before:
+              sys.exit("MemoryMapLib patch did not change anything")
+          mm.write_text(t, encoding="utf-8")
+          shim = Path("uefi-fuxi/BootShim/BootShim.S")
+          s = shim.read_text(encoding="utf-8")
+          old = "  ldr   x6,  =FD_SIZE\n\n_CopyLoop:"
+          if old not in s:
+              sys.exit("BootShim anchor not found")
+          new = "".join([
+            "  ldr   x6,  =FD_SIZE\n", "\n",
+            "  /* Discard stale dirty lines covering the destination before copying. */\n",
+            "  mrs   x9, ctr_el0\n", "  ubfx  x9, x9, #16, #4\n",
+            "  mov   x10, #4\n", "  lsl   x9, x10, x9\n", "  sub   x10, x9, #1\n",
+            "  bic   x11, x5, x10\n", "  add   x12, x5, x6\n",
+            "_InvalLoop:\n", "  dc    ivac, x11\n", "  add   x11, x11, x9\n",
+            "  cmp   x11, x12\n", "  b.lo  _InvalLoop\n", "  dsb   sy\n", "\n",
+            "_CopyLoop:",
+          ])
+          shim.write_text(s.replace(old, new, 1), encoding="utf-8")
+          print("patched MemoryMapLib and BootShim")
+          PY
+
+      - name: Install host tools
+        run: |
+          set -e
+          brew install mtools llvm lld unifdef cmake ninja dtc
+          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/opt/lld/bin" >> "$GITHUB_PATH"
+          command -v xcodebuild
+          xcodebuild -version
+          command -v mformat && command -v llvm-nm
+
+      - name: Install Mu pip requirements
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r uefi-fuxi/pip-requirements.txt
+
+      - name: defconfig
+        run: python3 ./unixnu defconfig fuxi_defconfig -D devices/fuxi
+
+      - name: fetch sources
+        run: python3 ./unixnu fetch
+
+      - name: build kernel
+        run: |
+          set -o pipefail
+          python3 ./unixnu build kernel 2>&1 | tee kernel-build.log
+
+      - name: build payload volume
+        run: |
+          set -o pipefail
+          python3 ./unixnu build payload \
+            --uefi uefi-fuxi \
+            --unique-chip-id "${{ inputs.chip_id }}" 2>&1 | tee payload.log
+
+      - name: build firmware
+        run: |
+          set -o pipefail
+          python3 ./unixnu build firmware \
+            --uefi uefi-fuxi \
+            --edk2 uefi-fuxi/Mu_Basecore \
+            --skip-preflight 2>&1 | tee firmware-build.log
+
+      - name: make boot image
+        run: |
+          set -o pipefail
+          python3 devices/fuxi/make-bootimg.py \
+            --uefi uefi-fuxi \
+            --dtb devices/fuxi/fuxi-live.dtb \
+            --ramdisk out/fuxi/payload/payload.img \
+            --output out/fuxi/boot/boot.img 2>&1 | tee bootimg.log
+          ls -l out/fuxi/boot/
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuxi-kernel-${{ github.run_id }}
+          path: |
+            out/fuxi/kernel/kernel.macho
+            out/fuxi/kernel/*.json
+            out/fuxi/payload/payload.img
+            out/fuxi/payload/payload.json
+            out/fuxi/boot/boot.img
+            kernel-build.log
+            payload.log
+            firmware-build.log
+            bootimg.log
+            out/fuxi/logs/**
+          if-no-files-found: warn
