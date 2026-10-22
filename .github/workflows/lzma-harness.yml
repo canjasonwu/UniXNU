@@ -30,6 +30,11 @@ jobs:
           ref: fuxi
           path: uefi-fuxi
 
+      - name: Fetch only the Mu_Basecore submodule
+        run: |
+          git -C uefi-fuxi submodule update --init --depth 1 Mu_Basecore
+          ls -d uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/Sdk/C
+
       - name: Install compilers and qemu
         run: |
           sudo apt-get update
