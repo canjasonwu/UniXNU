@@ -66,7 +66,7 @@ jobs:
           before = t
           t = re.sub(r'[ \t]*\{"FD Reserved".*?\},\r?\n', '', t)
           t = re.sub(r'("UEFI FD",\s*)0xA7100000,\s*0x00300000', r'\g<1>0xA7000000, 0x00400000', t)
-          if t == before:
+          if (t == before) and ("0xA7000000, 0x00400000" not in t):
               sys.exit("MemoryMapLib patch did not change anything")
           p.write_text(t, encoding="utf-8")
           print("patched MemoryMapLib")
@@ -81,7 +81,9 @@ jobs:
           t = p.read_text(encoding="utf-8")
           old = "  ldr   x6,  =FD_SIZE\n\n_CopyLoop:"
           if old not in t:
-              sys.exit("copy loop anchor not found in BootShim.S")
+              if "_InvalLoop" in t:
+                  print("BootShim already patched")
+                  raise SystemExit(0)
           new = "".join([
             "  ldr   x6,  =FD_SIZE\n",
             "\n",
@@ -122,7 +124,7 @@ jobs:
           before = t
           t = t.replace("  #fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf",
                         "  fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf")
-          if t == before:
+          if (t == before) and ("  fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf" not in t):
               sys.exit("fuxi.dsc entry not found")
           dsc.write_text(t, encoding="utf-8")
           inc = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc")
@@ -130,7 +132,7 @@ jobs:
           before = s
           s = s.replace("  #INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf",
                         "  INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf")
-          if s == before:
+          if (s == before) and ("  INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf" not in s):
               sys.exit("DXE.inc entry not found")
           inc.write_text(s, encoding="utf-8")
           print("FuxiBootMemoryDxe enabled")
@@ -152,14 +154,14 @@ jobs:
           before = t
           t = t.replace("  INF UniXNUPkg/Application/UniXNU/UniXNU.inf",
                         "  #INF UniXNUPkg/Application/UniXNU/UniXNU.inf")
-          if t == before:
+          if (t == before) and ("  #INF UniXNUPkg/Application/UniXNU/UniXNU.inf" not in t):
               sys.exit("UniXNU app entry not found in the FDF")
           fdf.write_text(t, encoding="utf-8")
           src = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c")
           s = src.read_text(encoding="utf-8")
           before = s
           s = s.replace("#define FUXI_REPORT_RESULT  0", "#define FUXI_REPORT_RESULT  1")
-          if s == before:
+          if (s == before) and ("#define FUXI_REPORT_RESULT  1" not in s):
               sys.exit("report switch not found")
           src.write_text(s, encoding="utf-8")
           print("app removed, driver self-reports through reset or hang")
