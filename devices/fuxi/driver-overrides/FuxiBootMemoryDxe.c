@@ -507,6 +507,14 @@ PublishInitrd (
   // Look there first, then search every range this driver just added as system
   // memory until a FAT boot sector shows up.
   //
+  {
+    UINT8  *Probe = (UINT8 *)(UINTN)Start;
+
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: initrd start 0x%lx bytes %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+            Start, Probe[0], Probe[1], Probe[2], Probe[3], Probe[4], Probe[5], Probe[6], Probe[7],
+            Probe[8], Probe[9], Probe[10], Probe[11], Probe[12], Probe[13], Probe[14], Probe[15]));
+  }
+
   if (FindFatVolume (Start, End, &FatStart, &FatBytes)) {
     DEBUG ((DEBUG_ERROR, "FUXIMEM: FAT volume in the initrd hint at 0x%lx size 0x%lx\n", FatStart, FatBytes));
   } else {
@@ -521,13 +529,6 @@ PublishInitrd (
         break;
       }
       FatStart = 0;
-    }
-
-    if (FatStart == 0) {
-      DEBUG ((DEBUG_ERROR, "FUXIMEM: not in system memory, scanning 0x80000000-0x100000000\n"));
-      if (FindFatVolume (0x80000000ULL, 0x100000000ULL, &FatStart, &FatBytes)) {
-        DEBUG ((DEBUG_ERROR, "FUXIMEM: payload volume at 0x%lx size 0x%lx\n", FatStart, FatBytes));
-      }
     }
 
     if (FatStart == 0) {
@@ -608,8 +609,8 @@ FuxiBootMemoryDxeEntry (
     DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=found, resetting after 5s\n"));
     gBS->Stall (5 * 1000 * 1000);
   } else {
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=missing, resetting after 45s\n"));
-    gBS->Stall (45 * 1000 * 1000);
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT=missing, resetting after 20s\n"));
+    gBS->Stall (20 * 1000 * 1000);
   }
 
   __asm__ __volatile__ (
