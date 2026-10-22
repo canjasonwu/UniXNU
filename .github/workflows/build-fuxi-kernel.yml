@@ -131,10 +131,15 @@ jobs:
       - name: make boot image
         run: |
           set -o pipefail
+          # v3 headers carry no dtb field, so ABL keeps its own tree and the
+          # initrd properties still describe the previous Android boot. v2 plus
+          # --dtb makes ABL fill in the addresses of the ramdisk it loaded.
           python3 devices/fuxi/make-bootimg.py \
             --uefi uefi-fuxi \
             --dtb devices/fuxi/fuxi-live.dtb \
             --ramdisk out/fuxi/payload/payload.img \
+            --header-version 2 \
+            --dtb-field \
             --output out/fuxi/boot/boot.img 2>&1 | tee bootimg.log
           ls -l out/fuxi/boot/
 
