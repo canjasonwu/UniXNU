@@ -16,6 +16,10 @@ name: build fuxi payload pipeline test
 
 on:
   workflow_dispatch:
+    inputs:
+      console_only:
+        description: '1 = leave the UniXNU app out so the DXE console text stays visible'
+        default: '0'
 
 jobs:
   pipeline:
@@ -122,6 +126,28 @@ jobs:
           print("FuxiBootMemoryDxe enabled")
           PY
           grep -n 'FuxiBootMemoryDxe' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc
+
+      - name: Optionally drop the UniXNU app for a console-only run
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.console_only == '1' }}
+        run: |
+          # The boot manager draws over the whole panel, which hides every DEBUG
+          # line the drivers printed before it. Leaving the application out keeps
+          # the console text on screen so the FUXIMEM:/MMU/volume-scan messages
+          # can be read and photographed.
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          fdf = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
+          t = fdf.read_text(encoding="utf-8")
+          before = t
+          t = t.replace("  INF UniXNUPkg/Application/UniXNU/UniXNU.inf",
+                        "  #INF UniXNUPkg/Application/UniXNU/UniXNU.inf")
+          if t == before:
+              sys.exit("UniXNU app entry not found in the FDF")
+          fdf.write_text(t, encoding="utf-8")
+          print("UniXNU application removed from the firmware volume")
+          PY
+          grep -n 'UniXNU' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf | head -5
 
       - name: Install host tools
         run: |
