@@ -154,7 +154,8 @@ def make_image(uefi, device, target, dtb_path, output, fd_override, shim_overrid
     kernel_file.write_bytes(kernel)
     command = [sys.executable, str(mkbootimg),
                "--kernel", str(kernel_file), "--ramdisk", str(ramdisk),
-               "-o", str(output), "--header_version", str(header_version)]
+               "-o", str(output), "--header_version", str(header_version),
+               "--pagesize", str(PAGE)]
     if use_dtb_field:
         command += ["--dtb", str(dtb_path)]
     run(command)
