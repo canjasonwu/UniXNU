@@ -615,8 +615,9 @@ FuxiBootMemoryDxeEntry (
     };
     UINTN       Count;
     EFI_HANDLE  *Handles;
-    UINTN       BlockCount = 0;
-    UINTN       FsCount    = 0;
+    UINTN       BlockCount   = 0;
+    UINTN       FsCount      = 0;
+    UINTN       DiskIoCount  = 0;
     UINTN       Delay;
 
     //
@@ -638,6 +639,17 @@ FuxiBootMemoryDxeEntry (
       FreePool (Handles);
     }
 
+    {
+      STATIC EFI_GUID  DiskIoGuid = {
+        0xCE345171, 0xBA0B, 0x11D2, { 0x8E, 0x24, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B }
+      };
+
+      if (!EFI_ERROR (gBS->LocateHandleBuffer (ByProtocol, &DiskIoGuid, NULL, &Count, &Handles))) {
+        DiskIoCount = Count;
+        FreePool (Handles);
+      }
+    }
+
     if (BlockCount > 4) {
       BlockCount = 4;
     }
@@ -646,9 +658,13 @@ FuxiBootMemoryDxeEntry (
       FsCount = 3;
     }
 
-    Delay = 5 + 20 * BlockCount + 100 * FsCount;
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT status=%r blockio=%u simplefs=%u delay=%us\n",
-            mPublishStatus, (UINT32)BlockCount, (UINT32)FsCount, (UINT32)Delay));
+    if (DiskIoCount > 3) {
+      DiskIoCount = 3;
+    }
+
+    Delay = 5 + 30 * DiskIoCount;
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT status=%r blockio=%u diskio=%u simplefs=%u delay=%us\n",
+            mPublishStatus, (UINT32)BlockCount, (UINT32)DiskIoCount, (UINT32)FsCount, (UINT32)Delay));
     gBS->Stall (Delay * 1000 * 1000);
   }
 
