@@ -85,7 +85,7 @@ def check_shim(shim, fd_len, fd_base, requires_header):
         sys.exit(f"boot shim image_size {image_size:#x} != shim + firmware {want:#x}")
 
 
-def make_image(uefi, device, target, dtb_path, output, fd_override, shim_override):
+def make_image(uefi, device, target, dtb_path, output, fd_override, shim_override, ramdisk_override=None):
     cfg = load_config(uefi, device)
     fd_cfg = cfg.get("uefi_fd") or {}
     fd_base = fd_cfg.get("base")
@@ -131,9 +131,14 @@ def make_image(uefi, device, target, dtb_path, output, fd_override, shim_overrid
     mkbootimg = uefi / "Resources/Scripts/mkbootimg.py"
     if not mkbootimg.is_file():
         sys.exit(f"missing mkbootimg: {mkbootimg}")
-    ramdisk = uefi / "Resources/ramdisk"
-    if not ramdisk.is_file():
-        sys.exit(f"missing ramdisk stub: {ramdisk}")
+    if ramdisk_override:
+        ramdisk = Path(ramdisk_override)
+        if not ramdisk.is_file():
+            sys.exit(f"missing ramdisk: {ramdisk}")
+    else:
+        ramdisk = uefi / "Resources/ramdisk"
+        if not ramdisk.is_file():
+            sys.exit(f"missing ramdisk stub: {ramdisk}")
 
     # mkbootimg reads files, so write the kernel next to the output first.
     kernel_file = output.with_suffix(".kernel")
@@ -188,10 +193,11 @@ def main():
     ap.add_argument("--dtb", required=True, type=Path)
     ap.add_argument("--output", required=True, type=Path)
     ap.add_argument("--fd", default=None)
+    ap.add_argument("--ramdisk", default=None, help="payload volume for the ramdisk field (default: the empty stub)")
     ap.add_argument("--shim", default=None, help="use this BootShim.bin instead of compiling one")
     args = ap.parse_args()
     return make_image(args.uefi, args.device, args.target, args.dtb, args.output,
-                      args.fd, args.shim)
+                      args.fd, args.shim, args.ramdisk)
 
 
 if __name__ == "__main__":
