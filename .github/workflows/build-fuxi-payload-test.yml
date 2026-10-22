@@ -166,11 +166,14 @@ jobs:
 
       - name: make boot image with the payload volume
         run: |
+          # unixnu bootimg verifies a v0 header layout and fuxi needs v3, so the
+          # image is assembled with the device's own v3-aware script.
           set -o pipefail
-          python3 ./unixnu bootimg \
+          python3 devices/fuxi/make-bootimg.py \
             --uefi uefi-fuxi \
             --dtb devices/fuxi/fuxi-live.dtb \
-            -o out/fuxi/boot/boot-payload.img 2>&1 | tee bootimg.log
+            --ramdisk out/fuxi/payload/payload.img \
+            --output out/fuxi/boot/boot-payload.img 2>&1 | tee bootimg.log
           ls -l out/fuxi/boot/
 
       - name: Upload
