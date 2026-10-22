@@ -180,6 +180,9 @@ size_mib = 192
 loader = "firmware"
 title = "fuxi first boot: source 4K XNU to console"
 panic_screen = true
+# 30 s instead of the default 3 s: the first bring-up needs the menu to stay on
+# screen long enough to photograph the entry list.
+timeout = 30
 skip_setup_tool = "scripts/seed-data-skip-setup.py"
 # MEASURED from the live device tree (fuxi-live.dtb, /sys/firmware/fdt).
 # dram_size is the low DRAM window, not the total. /memory starts at 0x80000000 and
