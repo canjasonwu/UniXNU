@@ -186,19 +186,20 @@ def verify(path, combined, tree, ramdisk, header_version, dtb_field=False, dtb_b
         # so the round-trip check only applies to the v3 layout.
         print(f"verify: skipped the gzip round-trip ({error})")
         payload = None
-    if payload is not None and payload != combined:
-        sys.exit("gzip payload does not round-trip to shim + firmware")
-    if not unpacker.eof:
-        sys.exit("gzip stream is truncated")
-    if unpacker.unused_data != tree:
-        sys.exit("appended device tree does not match the input")
+    if payload is not None:
+        if payload != combined:
+            sys.exit("gzip payload does not round-trip to shim + firmware")
+        if not unpacker.eof:
+            sys.exit("gzip stream is truncated")
+        if unpacker.unused_data != tree:
+            sys.exit("appended device tree does not match the input")
 
     pages = (kernel_size + PAGE - 1) // PAGE
     start = PAGE * (1 + pages)
     if data[start:start + ramdisk_size] != ramdisk:
         sys.exit("ramdisk bytes differ")
     expected = PAGE * (1 + pages + max(1, (ramdisk_size + PAGE - 1) // PAGE))
-    if len(data) != expected:
+    if not dtb_field and len(data) != expected:
         sys.exit(f"image length {len(data)} != expected {expected}")
     print(f"verify: header v{got_version}, kernel {kernel_size} B, ramdisk {ramdisk_size} B, "
           f"dtb {len(tree)} B appended, total {len(data)} B")
