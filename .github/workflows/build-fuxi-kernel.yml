@@ -108,6 +108,20 @@ jobs:
       - name: fetch sources
         run: python3 ./unixnu fetch
 
+      - name: Restore the kernel build tree
+        # The kernel script needs the compile records of osfmk/iokit before it can
+        # build the archives, and it can only produce them by compiling, which the
+        # script stops before doing when the archives are absent. Carry the tree
+        # across runs so a later run starts with the records an earlier one made.
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/fuxi/tree/build/xnu
+            out/fuxi/tree/.cache/fakeroot
+          key: fuxi-xnu-tree-v1-${{ hashFiles('devices/fuxi/configs/fuxi_defconfig') }}
+          restore-keys: |
+            fuxi-xnu-tree-v1-
+
       - name: build kernel
         env:
           # prepare-xnu-source.py reads the GitHub contents API; without a token the
