@@ -2,14 +2,21 @@
  *
  * Mirrors LzmaUefiDecompress() exactly: same SDK (Sdk/C/LzmaDec.c), same
  * bump allocator over a fixed scratch buffer, same LZMA_FINISH_END call with
- * the properties read out of the stream. Fed the real payload extracted from
- * SILICIUM_UEFI.fd, it answers one question without a device: does the 7z SDK
- * decoder reject this stream, or is the firmware's failure specific to the
- * AArch64 build?
+ * the properties read out of the stream.
+ *
+ * usage: harness payload.bin [scratch-bytes] [dst-offset]
+ *
+ * dst-offset reproduces PrePiLib's FwVol.c adjustment
+ *     DstBuffer = AllocatePages(...) + EFI_PAGE_SIZE - SectionHeaderSize
+ * which for a GUIDed section is 4096 - 4 = 4092, i.e. a page-aligned block
+ * advanced to a 4-byte aligned but not 8-byte aligned address. The destination
+ * is pre-filled with 0xAA so uninitialised heap contents cannot be mistaken for
+ * a correctness assumption.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "7zTypes.h"
 #include "LzmaDec.h"
@@ -26,8 +33,8 @@ SzAlloc (const ISzAlloc *P, size_t Size)
   ISzAllocWithData *d = (ISzAllocWithData *)P;
 
   if (d->BufferSize >= Size) {
-    void *a      = d->Buffer;
-    d->Buffer    = (unsigned char *)a + Size;
+    void *a        = d->Buffer;
+    d->Buffer      = (unsigned char *)a + Size;
     d->BufferSize -= Size;
     return a;
   }
@@ -48,10 +55,13 @@ main (int argc, char **argv)
   FILE              *f;
   long               size;
   unsigned char     *src;
+  void              *dstRaw;
   unsigned char     *dst;
   unsigned char     *scr;
   unsigned long long decoded = 0;
   size_t             scratch = 0x10000;
+  size_t             dstOff  = 0;
+  unsigned char      fill    = 0xAA;
   int                i;
   ISzAllocWithData   a;
   ELzmaStatus        st = LZMA_STATUS_NOT_SPECIFIED;
@@ -60,18 +70,14 @@ main (int argc, char **argv)
   SRes               res;
 
   if (argc < 2) {
-    fprintf (stderr, "usage: %s payload.bin [scratch-bytes]\n", argv[0]);
+    fprintf (stderr, "usage: %s payload.bin [scratch-bytes] [dst-offset]\n", argv[0]);
     return 2;
   }
-  if (argc > 2) {
-    scratch = (size_t)strtoull (argv[2], NULL, 0);
-  }
+  if (argc > 2) scratch = (size_t)strtoull (argv[2], NULL, 0);
+  if (argc > 3) dstOff  = (size_t)strtoull (argv[3], NULL, 0);
 
   f = fopen (argv[1], "rb");
-  if (f == NULL) {
-    perror ("fopen");
-    return 2;
-  }
+  if (f == NULL) { perror ("fopen"); return 2; }
   fseek (f, 0, SEEK_END);
   size = ftell (f);
   fseek (f, 0, SEEK_SET);
@@ -82,23 +88,23 @@ main (int argc, char **argv)
   }
   fclose (f);
 
-  for (i = 12; i >= 5; i--) {
-    decoded = (decoded << 8) + src[i];
-  }
+  for (i = 12; i >= 5; i--) decoded = (decoded << 8) + src[i];
 
-  printf ("payload=%ld props=0x%02x dict=%u decoded=%llu scratch=%zu\n",
-          size, src[0],
-          (unsigned)(src[1] | (src[2] << 8) | (src[3] << 16) | ((unsigned)src[4] << 24)),
-          decoded, scratch);
-
-  dst = (unsigned char *)malloc ((size_t)decoded);
-  scr = (unsigned char *)malloc (scratch);
-  if (dst == NULL || scr == NULL) {
+  /* page aligned block, then advanced by dstOff, like out of PrePiLib */
+  if (posix_memalign (&dstRaw, 4096, (size_t)decoded + 8192) != 0) {
     fprintf (stderr, "out of memory\n");
     return 2;
   }
-  memset (dst, 0, (size_t)decoded);
-  memset (scr, 0, scratch);
+  dst = (unsigned char *)dstRaw + dstOff;
+  scr = (unsigned char *)malloc (scratch);
+  if (scr == NULL) { fprintf (stderr, "out of memory\n"); return 2; }
+  memset (dst, fill, (size_t)decoded);
+  memset (scr, fill, scratch);
+
+  printf ("payload=%ld props=0x%02x dict=%u decoded=%llu scratch=%zu dstOff=%zu\n",
+          size, src[0],
+          (unsigned)(src[1] | (src[2] << 8) | (src[3] << 16) | ((unsigned)src[4] << 24)),
+          decoded, scratch, dstOff);
 
   a.Functions.Alloc = SzAlloc;
   a.Functions.Free  = SzFree;
