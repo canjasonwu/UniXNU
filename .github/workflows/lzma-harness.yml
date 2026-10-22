@@ -67,30 +67,27 @@ jobs:
             echo ""
             echo "================ $label ================"
             if [ ! -x "./$label" ]; then echo "build FAILED"; return; fi
-            $RUNNER ./"$label" $PAY 0x10000
+            $RUNNER ./"$label" "$@"
             echo "  exit=$?"
           }
 
-          echo "### variant 1: x86_64 clang -O2"
-          clang -O2 $INC $SRC -o v1_x86_O2 2>&1 | tail -5
-          RUNNER="" run v1_x86_O2
+          echo "### A: x86_64 clang -O2, page aligned destination"
+          clang -O2 $INC $SRC -o vA_x86 2>&1 | tail -5
+          RUNNER="" run vA_x86 $PAY 0x10000 0
 
-          echo "### variant 2: x86_64 clang -Oz -flto"
-          clang -Oz -flto -fuse-ld=lld $INC $SRC -o v2_x86_Oz 2>&1 | tail -5
-          RUNNER="" run v2_x86_Oz
-
-          echo "### variant 3: aarch64 clang -O2 (qemu)"
-          clang --target=aarch64-linux-gnu -fuse-ld=lld -O2 $INC $SRC -o v3_arm_O2 2>&1 | tail -5
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v3_arm_O2
-
-          echo "### variant 4: aarch64 clang -Oz -flto -mstrict-align (closest to the UEFI build)"
+          echo "### B: aarch64 clang -Oz -flto -mstrict-align, page aligned destination"
           clang --target=aarch64-linux-gnu -fuse-ld=lld -Oz -flto -mstrict-align \
-                -fno-builtin -funsigned-char -mno-implicit-float $INC $SRC -o v4_arm_uefi 2>&1 | tail -5
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v4_arm_uefi
+                -fno-builtin -funsigned-char -mno-implicit-float $INC $SRC -o vB_arm 2>&1 | tail -5
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x10000 0
 
-          echo "### variant 5: aarch64 gcc -Oz -flto (qemu)"
-          aarch64-linux-gnu-gcc -Oz -flto -mstrict-align $INC $SRC -o v5_arm_gcc 2>&1 | tail -5
-          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v5_arm_gcc
+          echo "### C: aarch64 same build, destination offset by 4"
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x10000 4
+
+          echo "### D: aarch64 same build, destination offset by 4092 (exactly what PrePiLib does)"
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x10000 4092
+
+          echo "### E: aarch64 same build, scratch 17 MiB and offset 4092"
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run vB_arm $PAY 0x1100000 4092
 
           echo ""
           echo "### reference: a standard decoder on the same bytes"
