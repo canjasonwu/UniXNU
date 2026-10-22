@@ -608,9 +608,36 @@ FuxiBootMemoryDxeEntry (
   // readable without a human looking at the panel.
   //
   {
-    UINTN  Delay = EFI_ERROR (mPublishStatus) ? 65 : 5;
+    STATIC EFI_GUID  SimpleFsGuid = {
+      0x964E5B22, 0x6459, 0x11D2, { 0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B }
+    };
+    UINTN       Count;
+    EFI_HANDLE  *Handles;
+    UINTN       BlockCount = 0;
+    UINTN       FsCount    = 0;
+    UINTN       Delay;
 
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT status=%r delay=%us\n", mPublishStatus, (UINT32)Delay));
+    if (!EFI_ERROR (gBS->LocateHandleBuffer (ByProtocol, &gEfiBlockIoProtocolGuid, NULL, &Count, &Handles))) {
+      BlockCount = Count;
+      FreePool (Handles);
+    }
+
+    if (!EFI_ERROR (gBS->LocateHandleBuffer (ByProtocol, &SimpleFsGuid, NULL, &Count, &Handles))) {
+      FsCount = Count;
+      FreePool (Handles);
+    }
+
+    if (BlockCount > 4) {
+      BlockCount = 4;
+    }
+
+    if (FsCount > 3) {
+      FsCount = 3;
+    }
+
+    Delay = 5 + 20 * BlockCount + 100 * FsCount;
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: REPORT status=%r blockio=%u simplefs=%u delay=%us\n",
+            mPublishStatus, (UINT32)BlockCount, (UINT32)FsCount, (UINT32)Delay));
     gBS->Stall (Delay * 1000 * 1000);
   }
 
