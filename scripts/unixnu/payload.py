@@ -58,7 +58,14 @@ def write_volume(stage, image, label, size_mib):
     image.unlink(missing_ok=True)
     env = dict(os.environ, MTOOLS_SKIP_CHECK='1', TZ='UTC')
     sectors = size_mib * 2048
-    run(['mformat', '-C', '-F', '-T', str(sectors), '-v', label, '-N', '53484e47', '-i', image, '::'], env=env, capture=True)
+    # FAT32 is only valid from 65525 clusters up. Forcing it on a small test
+    # volume produces something Linux tolerates but EDK2 rejects outright
+    # (EFI_VOLUME_CORRUPTED), so let mtools choose FAT16 below that size.
+    mformat_args = ['mformat', '-C', '-T', str(sectors), '-v', label, '-N', '53484e47', '-i', image]
+    if sectors >= 70000:
+        mformat_args.insert(2, '-F')
+    mformat_args.append('::')
+    run(mformat_args, env=env, capture=True)
     for entry in sorted(stage.iterdir()):
         run(['mcopy', '-i', image, '-s', '-Q', '-m', entry, '::/'], env=env, capture=True)
 
