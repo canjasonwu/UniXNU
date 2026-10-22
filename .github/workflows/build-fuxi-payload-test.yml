@@ -243,47 +243,29 @@ jobs:
           before = t
           probe = (
               "  {\n"
-              "    UINTN       ProbeCount;\n"
-              "    UINTN       ProbeIndex;\n"
-              "    EFI_HANDLE  *ProbeHandles;\n"
-              "    UINTN       ProbeFs;\n"
-              "    UINTN       ProbeDelay;\n"
-              "    STATIC EFI_GUID  ProbeFsGuid = {\n"
-              "      0x964E5B22, 0x6459, 0x11D2, { 0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B }\n"
-              "    };\n"
+              "    UINTN  ProbeDelay = 20 * Config->EntryCount;\n"
               "\n"
-              "    /* The block device appears during driver dispatch, possibly before\n"
-              "       every driver binding has been registered, so connect once more. */\n"
-              "    if (!EFI_ERROR (gBS->LocateHandleBuffer (AllHandles, NULL, NULL, &ProbeCount, &ProbeHandles))) {\n"
-              "      for (ProbeIndex = 0; ProbeIndex < ProbeCount; ProbeIndex++) {\n"
-              "        gBS->ConnectController (ProbeHandles[ProbeIndex], NULL, NULL, TRUE);\n"
-              "      }\n"
-              "      FreePool (ProbeHandles);\n"
+              "    if (Config->Volume == NULL) {\n"
+              "      ProbeDelay += 100;\n"
               "    }\n"
               "\n"
-              "    ProbeFs = 0;\n"
-              "    if (!EFI_ERROR (gBS->LocateHandleBuffer (ByProtocol, &ProbeFsGuid, NULL, &ProbeCount, &ProbeHandles))) {\n"
-              "      ProbeFs = ProbeCount;\n"
-              "      FreePool (ProbeHandles);\n"
-              "    }\n"
-              "\n"
-              "    ProbeDelay = (ProbeFs > 0) ? 120 : 10;\n"
-              "    DEBUG ((DEBUG_ERROR, \"UNIXNU: after connect all, simplefs=%u delay=%u\\n\", (UINT32)ProbeFs, (UINT32)ProbeDelay));\n"
+              "    DEBUG ((DEBUG_ERROR, \"UNIXNU: probe entries=%u volume=%u delay=%u\\n\",\n"
+              "            (UINT32)Config->EntryCount, (UINT32)(Config->Volume != NULL), (UINT32)ProbeDelay));\n"
               "    gBS->Stall (ProbeDelay * 1000 * 1000);\n"
               "    gRT->ResetSystem (EfiResetCold, EFI_SUCCESS, 0, NULL);\n"
               "  }\n"
               "\n"
           )
-          anchor = "  if (!Loaded && (Config->Error[0] == '\\0')) {"
+          anchor = "  Config->SourceLabel = AllocateCopyPool (StrSize (Label), Label);"
           if anchor not in t:
-              sys.exit("config scan anchor missing")
+              sys.exit("config tail anchor missing")
           t = t.replace(anchor, probe + anchor, 1)
           if t == before:
               sys.exit("probe did not apply")
           p.write_text(t, encoding="utf-8")
-          print("discovery order probe installed")
+          print("entry count probe installed")
           PY
-          grep -n 'after connect all' package/UniXNUPkg/Library/UniXNULib/Config.c
+          grep -n 'probe entries' package/UniXNUPkg/Library/UniXNULib/Config.c
       - name: Install host tools
         run: |
           sudo apt-get update
