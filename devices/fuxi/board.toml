@@ -59,24 +59,31 @@ defconfig = "fuxi_defconfig"
 archives = [
   "build-corecrypto-14.py",
   "build-corecrypto-14.py --namespace",
+  "build-arm-driver.py ArmDTPlatform",
+  "build-arm-driver.py ArmCpu",
+  "build-arm-driver.py NativeAES",
   "build-native-aes-bindings.py",
+  "build-arm-driver.py NativeUfs",
+  "build-arm-driver.py NativeVirtioBlock",
+  "build-arm-driver.py NativeRamBlock",
   "build-native-virtio-bindings.py --component NativeRamBlock --directory build/native-ram-block",
   "build-native-virtio-bindings.py --component NativeVirtioBlock",
   "build-mockfs-fixture.py",
+  "build-boot-progress.py",
   "build-libpthread-kernel.py",
-  "build-native-adreno-accelerator.py",
-  # TODO build-arm-driver.py
-  #   Generic wrapper that builds a lib<driver>.a from drivers/<name>. It lives in
-  #   UniXNU-sheng. Copy it verbatim; it is not sheng specific. Without it these
-  #   archives are missing: ArmDTPlatform, ArmCpu, NativeAES, NativeUfs,
-  #   NativeVirtioBlock, NativeRamBlock.
-  # TODO build-fuxi-platform-power.py
-  #   sheng counterpart: build-sheng-platform-power.py (SM8550 PMGR). Same SoC, so
-  #   it is the right starting point, but the power domains the panel and the GPU
-  #   need are board specific.
-  # TODO build-boot-progress.py          (sheng repository only)
-  # TODO build-native-adreno-kits.py     (sheng repository only)
-  # TODO build-native-legacy-display.py  (sheng repository only)
+  # Deliberately absent, each needs a fuxi implementation first (the configs that
+  # would use them are off in fuxi_defconfig):
+  #   build-fuxi-platform-power.py  (SM8550 PMGR; sheng's is board specific)
+  #   build-native-adreno-kits.py   (CONFIG_XNU_NATIVE_ADRENO)
+  #   build-arm-driver.py NativeAdreno / build-native-adreno-accelerator.py
+  #   build-native-legacy-display.py (CONFIG_XNU_NATIVE_LEGACY_DISPLAY)
+  #
+  # build-arm-driver.py and build-boot-progress.py were copied from UniXNU-sheng
+  # and only had their paths adapted (kits/fuxi, uefi-fuxi). The boot progress
+  # sources in devices/fuxi/package/ are the same baseline: they write to the
+  # frame buffer through the firmware's serial port library, which is SoC generic,
+  # and are the piece that turns an early kernel panic into something readable on
+  # the panel. Replace them with fuxi specific code once the kernel runs.
 ]
 
 # Device independent: all of this describes the iPadOS kernelcache, which is the
