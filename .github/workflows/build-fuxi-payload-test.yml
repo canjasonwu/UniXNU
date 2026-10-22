@@ -92,6 +92,37 @@ jobs:
           print("BootShim invalidate loop inserted")
           PY
 
+      - name: Enable the boot memory driver
+        run: |
+          # Without FuxiBootMemoryDxe nothing ever publishes /chosen's initrd as a
+          # block device, so the payload FAT volume cannot be seen and the boot
+          # manager always reports "no boot entry found". It was disabled because
+          # the ranges it derives from the Android live FDT made DXE touch MMIO
+          # and fault; this run turns it back on to capture its own debug output
+          # (FUXIMEM: ...) on the panel.
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          dsc = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc")
+          t = dsc.read_text(encoding="utf-8")
+          before = t
+          t = t.replace("  #fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf",
+                        "  fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf")
+          if t == before:
+              sys.exit("fuxi.dsc entry not found")
+          dsc.write_text(t, encoding="utf-8")
+          inc = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc")
+          s = inc.read_text(encoding="utf-8")
+          before = s
+          s = s.replace("  #INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf",
+                        "  INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf")
+          if s == before:
+              sys.exit("DXE.inc entry not found")
+          inc.write_text(s, encoding="utf-8")
+          print("FuxiBootMemoryDxe enabled")
+          PY
+          grep -n 'FuxiBootMemoryDxe' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc
+
       - name: Install host tools
         run: |
           sudo apt-get update
