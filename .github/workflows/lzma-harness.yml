@@ -1,0 +1,92 @@
+# Reproduce the firmware's LZMA failure on a normal Linux host, no device needed.
+#
+# The fuxi build of Mu's LzmaCustomDecompressLib returns SZ_ERROR_DATA for a
+# stream that a standard decoder handles perfectly, and the in-memory copy of
+# that stream was verified byte-identical to the .fd. This job isolates the
+# decoder: it compiles Sdk/C/LzmaDec.c on its own and feeds it the exact same
+# payload, for several targets and optimisation levels -- including AArch64 with
+# the -Oz -flto combination the UEFI build uses, run under qemu.
+#
+# Target location in the fork: .github/workflows/lzma-harness.yml
+
+name: lzma host harness
+
+on:
+  workflow_dispatch:
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Checkout uefi-fuxi for the SDK sources
+        uses: actions/checkout@v4
+        with:
+          repository: hanzi123-bilp/uefi-fuxi
+          ref: fuxi
+          path: uefi-fuxi
+
+      - name: Install compilers and qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld gcc-aarch64-linux-gnu qemu-user-static
+
+      - name: Show the fixture
+        run: |
+          ls -l devices/fuxi/test/
+          python3 - <<'PY'
+          import hashlib, struct
+          b = open("devices/fuxi/test/lzma-payload.bin", "rb").read()
+          print("payload bytes :", len(b))
+          print("props         : 0x%02x" % b[0])
+          print("dict          : %d" % struct.unpack_from("<I", b, 1)[0])
+          print("declared out  : %d" % struct.unpack_from("<Q", b, 5)[0])
+          print("sha256        :", hashlib.sha256(b).hexdigest())
+          PY
+
+      - name: Build and run every variant
+        run: |
+          set +e
+          SDK=uefi-fuxi/Mu_Basecore/MdeModulePkg/Library/LzmaCustomDecompressLib/Sdk/C
+          SRC="devices/fuxi/test/lzma_harness.c $SDK/LzmaDec.c"
+          PAY=devices/fuxi/test/lzma-payload.bin
+          INC="-I$SDK"
+
+          run() {
+            label="$1"; shift
+            echo ""
+            echo "================ $label ================"
+            if [ ! -x "./$label" ]; then echo "build FAILED"; return; fi
+            $RUNNER ./"$label" $PAY 0x10000
+            echo "  exit=$?"
+          }
+
+          echo "### variant 1: x86_64 clang -O2"
+          clang -O2 $INC $SRC -o v1_x86_O2 2>&1 | tail -5
+          RUNNER="" run v1_x86_O2
+
+          echo "### variant 2: x86_64 clang -Oz -flto"
+          clang -Oz -flto -fuse-ld=lld $INC $SRC -o v2_x86_Oz 2>&1 | tail -5
+          RUNNER="" run v2_x86_Oz
+
+          echo "### variant 3: aarch64 gcc -O2 (qemu)"
+          aarch64-linux-gnu-gcc -O2 $INC $SRC -o v3_arm_O2 2>&1 | tail -5
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v3_arm_O2
+
+          echo "### variant 4: aarch64 gcc -Oz -flto (qemu, closest to the UEFI build)"
+          aarch64-linux-gnu-gcc -Oz -flto $INC $SRC -o v4_arm_Oz 2>&1 | tail -5
+          RUNNER="qemu-aarch64-static -L /usr/aarch64-linux-gnu" run v4_arm_Oz
+
+          echo ""
+          echo "### reference: a standard decoder on the same bytes"
+          python3 - <<'PY'
+          import lzma
+          b = open("devices/fuxi/test/lzma-payload.bin", "rb").read()
+          out = lzma.decompress(b, format=lzma.FORMAT_ALONE)
+          print("liblzma decoded", len(out), "bytes, first4", out[:4].hex())
+          PY
