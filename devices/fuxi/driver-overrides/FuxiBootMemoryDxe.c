@@ -160,6 +160,12 @@ Subtract (
   return Result;
 }
 
+#define MAX_MEM_RANGES  16
+
+STATIC UINT64  mRangeBase[MAX_MEM_RANGES];
+STATIC UINT64  mRangeEnd[MAX_MEM_RANGES];
+STATIC UINTN   mRangeCount = 0;
+
 STATIC
 VOID
 AddMemory (
@@ -296,11 +302,6 @@ AddMemory (
 }
 
 #define RAM_BLOCK_SIZE  512
-#define MAX_MEM_RANGES  16
-
-STATIC UINT64  mRangeBase[MAX_MEM_RANGES];
-STATIC UINT64  mRangeEnd[MAX_MEM_RANGES];
-STATIC UINTN   mRangeCount = 0;
 
 #pragma pack(1)
 typedef struct {
