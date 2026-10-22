@@ -108,6 +108,15 @@ jobs:
       - name: fetch sources
         run: python3 ./unixnu fetch
 
+      - name: pre-build the kernel archives
+        run: |
+          # The kernel script runs as a bootstrap pass before unixnu builds the
+          # board's archives, and it stops at `test -f <archive>` before it has
+          # compiled anything on a clean checkout. Build them first so the pass
+          # can produce the compile records; failures here are expected for the
+          # builders that need those records and are retried later by unixnu.
+          python3 scripts/prebuild-kernel-archives.py 2>&1 | tee prebuild.log
+
       - name: build kernel
         run: |
           set -o pipefail
@@ -155,6 +164,7 @@ jobs:
             out/fuxi/payload/payload.json
             out/fuxi/boot/boot.img
             kernel-build.log
+            prebuild.log
             payload.log
             firmware-build.log
             bootimg.log
