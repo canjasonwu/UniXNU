@@ -95,8 +95,12 @@ jobs:
 
       - name: Install Mu pip requirements
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r uefi-fuxi/pip-requirements.txt
+          # Homebrew's python is externally managed (PEP 668), so the build runs
+          # inside a venv that is put first on PATH for the following steps.
+          python3 -m venv "$GITHUB_WORKSPACE/.venv"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          "$GITHUB_WORKSPACE/.venv/bin/python" -m pip install --upgrade pip
+          "$GITHUB_WORKSPACE/.venv/bin/python" -m pip install -r uefi-fuxi/pip-requirements.txt
 
       - name: defconfig
         run: python3 ./unixnu defconfig fuxi_defconfig -D devices/fuxi
