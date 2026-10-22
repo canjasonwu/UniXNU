@@ -280,6 +280,11 @@ AddMemory (
           gDS->RemoveMemorySpace (Base, End - Base);
         } else {
           Added += End - Base;
+          if (mRangeCount < MAX_MEM_RANGES) {
+            mRangeBase[mRangeCount] = Base;
+            mRangeEnd[mRangeCount]  = End;
+            mRangeCount++;
+          }
         }
       }
 
@@ -291,6 +296,11 @@ AddMemory (
 }
 
 #define RAM_BLOCK_SIZE  512
+#define MAX_MEM_RANGES  16
+
+STATIC UINT64  mRangeBase[MAX_MEM_RANGES];
+STATIC UINT64  mRangeEnd[MAX_MEM_RANGES];
+STATIC UINTN   mRangeCount = 0;
 
 #pragma pack(1)
 typedef struct {
@@ -392,6 +402,53 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
 STATIC BOOLEAN  mFatPublished = FALSE;
 
 STATIC
+BOOLEAN
+FindFatVolume (
+  IN  UINT64  Base,
+  IN  UINT64  End,
+  OUT UINT64  *FatStart,
+  OUT UINT64  *FatBytes
+  )
+{
+  UINT64  Scan;
+  UINT64  Limit = End & ~(UINT64)(RAM_BLOCK_SIZE - 1);
+
+  for (Scan = Base & ~(UINT64)(RAM_BLOCK_SIZE - 1); Scan + RAM_BLOCK_SIZE <= Limit; Scan += RAM_BLOCK_SIZE) {
+    UINT8   *Sector = (UINT8 *)(UINTN)Scan;
+    UINT32   Bps;
+    UINT32   Total;
+
+    if ((Sector[510] != 0x55) || (Sector[511] != 0xAA)) {
+      continue;
+    }
+
+    if (!(((Sector[54] == 'F') && (Sector[55] == 'A') && (Sector[56] == 'T')) ||
+          ((Sector[82] == 'F') && (Sector[83] == 'A') && (Sector[84] == 'T'))))
+    {
+      continue;
+    }
+
+    Bps   = (UINT32)Sector[11] | ((UINT32)Sector[12] << 8);
+    Total = (UINT32)Sector[19] | ((UINT32)Sector[20] << 8) |
+            ((UINT32)Sector[21] << 16) | ((UINT32)Sector[22] << 24);
+    if (Total == 0) {
+      Total = (UINT32)Sector[32] | ((UINT32)Sector[33] << 8) |
+              ((UINT32)Sector[34] << 16) | ((UINT32)Sector[35] << 24);
+    }
+
+    if ((Bps == 0) || (Total == 0)) {
+      continue;
+    }
+
+    *FatStart = Scan;
+    *FatBytes = (UINT64)Bps * (UINT64)Total;
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+STATIC
 VOID
 PublishInitrd (
   IN CONST VOID  *Fdt
@@ -405,6 +462,8 @@ PublishInitrd (
   INT32       EndLength;
   UINT64      Start;
   UINT64      End;
+  UINT64      FatStart = 0;
+  UINT64      FatBytes = 0;
   EFI_HANDLE  Handle;
 
   Chosen = FdtPathOffset (Fdt, "/chosen");
@@ -430,58 +489,35 @@ PublishInitrd (
   }
 
   //
-  // The reported range is only a hint. On this board ABL reports a range that
-  // spans far more than the ramdisk and is not sector aligned, so look for the
-  // FAT boot sector inside it and publish the volume that boot sector describes.
+  // The device tree's initrd hint is not reliable on this board: ABL reports
+  // 0xB5A9A000-0xB7FFE515, a 37 MiB range that contains no FAT volume at all.
+  // Look there first, then search every range this driver just added as system
+  // memory until a FAT boot sector shows up.
   //
-  {
-    UINT64  Scan;
-    UINT64  Limit    = End & ~(UINT64)(RAM_BLOCK_SIZE - 1);
-    UINT64  FatStart = 0;
-    UINT64  FatBytes = 0;
+  if (FindFatVolume (Start, End, &FatStart, &FatBytes)) {
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: FAT volume in the initrd hint at 0x%lx size 0x%lx\n", FatStart, FatBytes));
+  } else {
+    UINTN  Range;
 
-    for (Scan = Start; Scan + RAM_BLOCK_SIZE <= Limit; Scan += RAM_BLOCK_SIZE) {
-      UINT8   *Sector = (UINT8 *)(UINTN)Scan;
-      UINT32   Bps;
-      UINT32   Total;
-
-      if ((Sector[510] != 0x55) || (Sector[511] != 0xAA)) {
-        continue;
+    DEBUG ((DEBUG_ERROR, "FUXIMEM: no FAT in the initrd hint, searching system memory\n"));
+    FatStart = 0;
+    for (Range = 0; Range < mRangeCount; Range++) {
+      if (FindFatVolume (mRangeBase[Range], mRangeEnd[Range], &FatStart, &FatBytes)) {
+        DEBUG ((DEBUG_ERROR, "FUXIMEM: FAT volume at 0x%lx size 0x%lx (range 0x%lx-0x%lx)\n",
+                FatStart, FatBytes, mRangeBase[Range], mRangeEnd[Range]));
+        break;
       }
-
-      if (!(((Sector[54] == 'F') && (Sector[55] == 'A') && (Sector[56] == 'T')) ||
-            ((Sector[82] == 'F') && (Sector[83] == 'A') && (Sector[84] == 'T'))))
-      {
-        continue;
-      }
-
-      Bps   = (UINT32)Sector[11] | ((UINT32)Sector[12] << 8);
-      Total = (UINT32)Sector[19] | ((UINT32)Sector[20] << 8) |
-              ((UINT32)Sector[21] << 16) | ((UINT32)Sector[22] << 24);
-      if (Total == 0) {
-        Total = (UINT32)Sector[32] | ((UINT32)Sector[33] << 8) |
-                ((UINT32)Sector[34] << 16) | ((UINT32)Sector[35] << 24);
-      }
-
-      if ((Bps == 0) || (Total == 0)) {
-        continue;
-      }
-
-      FatStart = Scan;
-      FatBytes = (UINT64)Bps * (UINT64)Total;
-      break;
+      FatStart = 0;
     }
 
     if (FatStart == 0) {
-      DEBUG ((DEBUG_ERROR, "FUXIMEM: no FAT volume in initrd 0x%lx-0x%lx\n", Start, End));
+      DEBUG ((DEBUG_ERROR, "FUXIMEM: no FAT volume anywhere\n"));
       return;
     }
-
-    DEBUG ((DEBUG_ERROR, "FUXIMEM: FAT volume at 0x%lx size 0x%lx (initrd hint 0x%lx-0x%lx)\n",
-            FatStart, FatBytes, Start, End));
-    Start = FatStart;
-    End   = FatStart + FatBytes;
   }
+
+  Start = FatStart;
+  End   = FatStart + FatBytes;
 
   mRamBase                = (UINT8 *)(UINTN)Start;
   mMedia.MediaId          = 1;
