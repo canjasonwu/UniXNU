@@ -1,17 +1,19 @@
 /* Host reproduction of MdeModulePkg/Library/LzmaCustomDecompressLib.
  *
- * Mirrors LzmaUefiDecompress() exactly: same SDK (Sdk/C/LzmaDec.c), same
- * bump allocator over a fixed scratch buffer, same LZMA_FINISH_END call with
- * the properties read out of the stream.
+ * The firmware does not compile the SDK as plain C: UefiLzma.h injects
+ *
+ *     typedef UINTN size_t;
+ *     typedef int   ptrdiff_t;
+ *     #define memcpy  CopyMem
+ *     #define memmove CopyMem
+ *     #define _LZMA_SIZE_OPT
+ *
+ * _LZMA_SIZE_OPT selects a completely different decoder implementation inside
+ * Sdk/C/LzmaDec.c, and memcpy is redirected to EDK2's CopyMem. This harness
+ * provides both so the exact firmware configuration can be reproduced on the
+ * host.
  *
  * usage: harness payload.bin [scratch-bytes] [dst-offset]
- *
- * dst-offset reproduces PrePiLib's FwVol.c adjustment
- *     DstBuffer = AllocatePages(...) + EFI_PAGE_SIZE - SectionHeaderSize
- * which for a GUIDed section is 4096 - 4 = 4092, i.e. a page-aligned block
- * advanced to a 4-byte aligned but not 8-byte aligned address. The destination
- * is pre-filled with 0xAA so uninitialised heap contents cannot be mistaken for
- * a correctness assumption.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +28,36 @@ typedef struct {
   unsigned char  *Buffer;
   size_t          BufferSize;
 } ISzAllocWithData;
+
+/* EDK2 MdePkg/Library/BaseMemoryLib/CopyMem.c semantics, overlap safe. */
+void *
+CopyMem (
+  void        *DestinationBuffer,
+  const void  *SourceBuffer,
+  size_t       Length
+  )
+{
+  unsigned char        *d8;
+  const unsigned char  *s8;
+
+  if (DestinationBuffer == SourceBuffer || Length == 0) {
+    return DestinationBuffer;
+  }
+  if ((const unsigned char *)SourceBuffer > (unsigned char *)DestinationBuffer) {
+    d8 = (unsigned char *)DestinationBuffer;
+    s8 = (const unsigned char *)SourceBuffer;
+    while (Length-- != 0) {
+      *d8++ = *s8++;
+    }
+  } else {
+    d8 = (unsigned char *)DestinationBuffer + Length;
+    s8 = (const unsigned char *)SourceBuffer + Length;
+    while (Length-- != 0) {
+      *--d8 = *--s8;
+    }
+  }
+  return DestinationBuffer;
+}
 
 static void *
 SzAlloc (const ISzAlloc *P, size_t Size)
@@ -61,7 +93,6 @@ main (int argc, char **argv)
   unsigned long long decoded = 0;
   size_t             scratch = 0x10000;
   size_t             dstOff  = 0;
-  unsigned char      fill    = 0xAA;
   int                i;
   ISzAllocWithData   a;
   ELzmaStatus        st = LZMA_STATUS_NOT_SPECIFIED;
@@ -90,7 +121,6 @@ main (int argc, char **argv)
 
   for (i = 12; i >= 5; i--) decoded = (decoded << 8) + src[i];
 
-  /* page aligned block, then advanced by dstOff, like out of PrePiLib */
   if (posix_memalign (&dstRaw, 4096, (size_t)decoded + 8192) != 0) {
     fprintf (stderr, "out of memory\n");
     return 2;
@@ -98,13 +128,18 @@ main (int argc, char **argv)
   dst = (unsigned char *)dstRaw + dstOff;
   scr = (unsigned char *)malloc (scratch);
   if (scr == NULL) { fprintf (stderr, "out of memory\n"); return 2; }
-  memset (dst, fill, (size_t)decoded);
-  memset (scr, fill, scratch);
+  memset (dst, 0xAA, (size_t)decoded);
+  memset (scr, 0xAA, scratch);
 
   printf ("payload=%ld props=0x%02x dict=%u decoded=%llu scratch=%zu dstOff=%zu\n",
           size, src[0],
           (unsigned)(src[1] | (src[2] << 8) | (src[3] << 16) | ((unsigned)src[4] << 24)),
           decoded, scratch, dstOff);
+#ifdef _LZMA_SIZE_OPT
+  printf ("config: _LZMA_SIZE_OPT=on\n");
+#else
+  printf ("config: _LZMA_SIZE_OPT=off\n");
+#endif
 
   a.Functions.Alloc = SzAlloc;
   a.Functions.Free  = SzFree;
