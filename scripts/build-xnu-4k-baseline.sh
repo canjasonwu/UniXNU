@@ -756,6 +756,25 @@ EXTRA_CFLAGS="$EXTRA_CFLAGS -DXNU_BOOT_PROGRESS=$BOOT_PROGRESS"
 # "no SubSystem declaration"). The flag comes from MIGKSFLAGS, used by the iokit
 # DriverKit server stubs. Drop it and let the stubs generate.
 EXTRA_MAKE_ARGS+=("MIGKSFLAGS=-DMACH_KERNEL_PRIVATE -DKERNEL_SERVER=1")
+# Record pass: the kernel link recipe writes link.filelist and only then runs the
+# linker (makedefs/MakeInc.kernel), and the archive builders need that file. The
+# link target only runs when its archive prerequisites exist, so give the absent
+# ones empty placeholders: the linker then fails on the missing symbols, which
+# does not matter here, but link.filelist has already been written.
+if [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]; then
+  for STUB_VAR in $(compgen -v | grep -E '_ARCHIVE$|_BOOTSTRAP$'); do
+    STUB_VALUE="${!STUB_VAR}"
+    case "$STUB_VALUE" in
+      *.a|*.o)
+        if [ ! -f "$STUB_VALUE" ]; then
+          mkdir -p "$(dirname "$STUB_VALUE")"
+          : > "$STUB_VALUE"
+          echo "bootstrap placeholder: $STUB_VAR=$STUB_VALUE"
+        fi
+        ;;
+    esac
+  done
+fi
 make -C .cache/xnu-work ${XNU_MAKE_FLAGS:-} ${XNU_MAKE_TARGETS:-"${XNU_BUILD_TARGET:-build}"} SDKROOT="${XNU_SDKROOT:-iphoneos}" ARCH_CONFIGS=ARM64 \
   MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS=DEVELOPMENT \
   ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY \
