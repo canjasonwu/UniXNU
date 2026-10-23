@@ -24,8 +24,10 @@ CONFIG_XNU_NATIVE_RAM_BLOCK=n
 CONFIG_XNU_TRUST_CACHE_RUNTIME=y
 CONFIG_XNU_SOURCE_MOCKFS=y
 CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
-CONFIG_XNU_VERIFIED_ROOT_PROBE=y
-CONFIG_XNU_OWNER_ROOT_AUDIT=y
+# The verified-root probe is built from a SystemOS verification record that belongs to
+# the owner chain, which is off. Without the switch the kernel never references it.
+CONFIG_XNU_VERIFIED_ROOT_PROBE=n
+CONFIG_XNU_OWNER_ROOT_AUDIT=n
 # The owner-root chain needs a verified block transport, which the disabled storage
 # drivers provided. Off for the first console-only kernel; each switch is required by
 # the next one, so the whole chain goes together.
@@ -72,7 +74,7 @@ CONFIG_XNU_OWNER_DATA_VOLUME_UUID="5C3B8E14-2A6D-4F79-B0E3-8D41F2A7C95E"
 
 CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 # native-virtio-block archive unused while the transport is off
-CONFIG_XNU_VERIFIED_ROOT_ARCHIVE="{tree}/build/verified-root-os-xnu-bundle/libVerifiedRootProbe.a"
+# verified root probe archive unused while the probe is off
 CONFIG_XNU_EXTRA_LD_ARCHIVES=""
 CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
 CONFIG_XNU_ARMVIRT_PLATFORM=n
