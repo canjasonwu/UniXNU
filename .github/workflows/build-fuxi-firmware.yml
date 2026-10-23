@@ -35,10 +35,6 @@ on:
       watchdog_seconds:
         description: 'reset the device after N seconds (0 = no watchdog); used for unattended test loops'
         default: '0'
-  push:
-    paths:
-      - 'devices/fuxi/**'
-      - '.github/workflows/build-fuxi-firmware.yml'
 
 jobs:
   firmware:
