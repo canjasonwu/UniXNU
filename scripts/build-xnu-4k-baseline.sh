@@ -775,6 +775,13 @@ if [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]; then
     esac
   done
 fi
+# The iig-generated DriverKit sources call IORPCMessageFromMach without including
+# the header that declares it, which only Apple's own tree provides implicitly. A
+# forced include limited to C++ puts the declaration back without touching C files.
+IOKIT_RPC_SHIM="$ROOT/build/iokit-iig-shim.h"
+mkdir -p "$(dirname "$IOKIT_RPC_SHIM")"
+printf '%s\n' '#ifdef __cplusplus' '#include <IOKit/IORPC.h>' '#endif' > "$IOKIT_RPC_SHIM"
+EXTRA_CFLAGS="$EXTRA_CFLAGS -I$ROOT/.cache/xnu-work/iokit -include $IOKIT_RPC_SHIM"
 make -C .cache/xnu-work ${XNU_MAKE_FLAGS:-} ${XNU_MAKE_TARGETS:-"${XNU_BUILD_TARGET:-build}"} SDKROOT="${XNU_SDKROOT:-iphoneos}" ARCH_CONFIGS=ARM64 \
   MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS=DEVELOPMENT \
   ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY \
