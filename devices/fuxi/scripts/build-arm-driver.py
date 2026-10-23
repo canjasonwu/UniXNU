@@ -70,8 +70,15 @@ command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unknown-warning-option', '-
                 '-Wno-c99-designator', '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
                 '-Wno-unnecessary-virtual-specifier', '-I', str(ROOT / '.cache/xnu-work/osfmk')])
 if component in ('NativeVirtioBlock', 'NativeRamBlock', 'NativeUfs'):
-    # The storage drivers include <IOKit/storage/...>, which lives in the xnu iokit
-    # tree; the record only carries the osfmk include path.
+    # The storage drivers include <IOKit/storage/IOBlockStorageDevice.h>, but this
+    # xnu tree keeps iokit headers flat (iokit/IOKit/*.h) and the only copy of that
+    # header sits in iokit/IOKitUser. Recreate the include layout the drivers expect
+    # inside the storage include directory that is already on the path.
+    storage_header = ROOT / '.cache/xnu-work/iokit/IOKitUser/IOBlockStorageDevice.h'
+    storage_shim = ROOT / 'build/storage-abi/include/IOKit/storage'
+    if storage_header.is_file():
+        storage_shim.mkdir(parents=True, exist_ok=True)
+        (storage_shim / 'IOBlockStorageDevice.h').write_bytes(storage_header.read_bytes())
     command += ['-I', str(ROOT / '.cache/xnu-work/iokit'),
                 '-I', str(ROOT / 'build/storage-abi/include')]
     if args.verified_root:
