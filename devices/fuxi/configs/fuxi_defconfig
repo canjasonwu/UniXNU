@@ -16,8 +16,11 @@ CONFIG_XNU_ARMCPU=y
 # xnu only ships a forwarding stub to a DriverKit header that does not exist here.
 CONFIG_XNU_NATIVE_UFS=n
 CONFIG_XNU_NATIVE_AES=y
-CONFIG_XNU_NATIVE_VIRTIO_BLOCK=y
-CONFIG_XNU_NATIVE_RAM_BLOCK=y
+# The virtio transports are storage drivers too: they include
+# <IOKit/storage/IOBlockStorageDevice.h>, which this xnu does not ship. Off until
+# that header question is settled; the first kernel only has to reach the console.
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK=n
+CONFIG_XNU_NATIVE_RAM_BLOCK=n
 CONFIG_XNU_TRUST_CACHE_RUNTIME=y
 CONFIG_XNU_SOURCE_MOCKFS=y
 CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
@@ -64,7 +67,7 @@ CONFIG_XNU_BOOT_PROGRESS=y
 CONFIG_XNU_OWNER_DATA_VOLUME_UUID="5C3B8E14-2A6D-4F79-B0E3-8D41F2A7C95E"
 
 CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
-CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/native-virtio-block-verified-bundle/libNativeVirtioBlock.a"
+# native-virtio-block archive unused while the transport is off
 CONFIG_XNU_VERIFIED_ROOT_ARCHIVE="{tree}/build/verified-root-os-xnu-bundle/libVerifiedRootProbe.a"
 CONFIG_XNU_EXTRA_LD_ARCHIVES=""
 CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
