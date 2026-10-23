@@ -710,7 +710,29 @@ PY_BINDINGS
     KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $ROOT/build/boot-progress/libBootProgress.a"
   fi
   KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES ${XNU_EXTRA_LD_ARCHIVES:-}"
-  EXTRA_MAKE_ARGS+=("LD_KERNEL_ARCHIVES=$KERNEL_EXTRA_ARCHIVES")
+  # Two symbols the kernel references but no enabled component defines: the load probe
+# added by patches/xnu/offline-component-load-probes.patch is compiled in every
+# DEVELOPMENT kernel yet lives in the disabled display archive, and the iig generated
+# sources call IORPCMessageFromMach whose definition xnu keeps outside the kernel.
+# Supply inert definitions so the kernel links; nothing calls them on this board.
+STUB_DIR="$ROOT/build/offline-probe-stubs"
+mkdir -p "$STUB_DIR"
+printf '%s\n' \
+  '#include <IOKit/IORPC.h>' \
+  'extern "C" void native_legacy_display_probe(void) {}' \
+  'extern "C" IORPCMessage *IORPCMessageFromMach(IORPCMessageMach * msg, bool reply)' \
+  '{ (void)msg; (void)reply; return NULL; }' > "$STUB_DIR/stubs.cpp"
+if xcrun clang++ -c -o "$STUB_DIR/stubs.o" "$STUB_DIR/stubs.cpp" -DKERNEL=1 -target arm64-apple-ios17.0 \
+   -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" -I "$ROOT/.cache/xnu-work/iokit" \
+   -I "$ROOT/.cache/fakeroot/System/Library/Frameworks/Kernel.framework/Headers" 2>/dev/null; then
+  xcrun libtool -static -o "$STUB_DIR/libOfflineProbeStubs.a" "$STUB_DIR/stubs.o"
+  KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STUB_DIR/libOfflineProbeStubs.a"
+  KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $STUB_DIR/libOfflineProbeStubs.a"
+else
+  echo 'offline probe stubs did not compile' >&2
+  exit 1
+fi
+EXTRA_MAKE_ARGS+=("LD_KERNEL_ARCHIVES=$KERNEL_EXTRA_ARCHIVES")
   EXTRA_MAKE_ARGS+=("XNU_EXTERNAL_KERNEL_ARCHIVES=$KERNEL_ARCHIVE_DEPENDENCIES")
 fi
 python3 - "${XNU_NATIVE_AES:-0}" "${XNU_NATIVE_AES_ARCHIVE:-$ROOT/build/native-aes/libNativeAES.a}" \
