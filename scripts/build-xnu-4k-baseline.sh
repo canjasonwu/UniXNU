@@ -797,7 +797,15 @@ if [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]; then
   # it here when the link never got that far; the archive builders run nm over it to
   # learn which symbols the kernel itself defines.
   if [ ! -f "$EXTRA_OBJDIR/link.filelist" ]; then
-    find "$EXTRA_OBJDIR" -name '*.o' -type f | sort > "$EXTRA_OBJDIR/link.filelist"
+    # Not every .o in the objdir is a kernel object (genassym.o and friends are host
+    # tools), and nm aborts the whole batch on one it cannot read, so keep the ones
+    # nm accepts.
+    : > "$EXTRA_OBJDIR/link.filelist"
+    for OBJ_CANDIDATE in $(find "$EXTRA_OBJDIR" -name '*.o' -type f | sort); do
+      if xcrun nm -U -j "$OBJ_CANDIDATE" > /dev/null 2>&1; then
+        echo "$OBJ_CANDIDATE" >> "$EXTRA_OBJDIR/link.filelist"
+      fi
+    done
     echo "bootstrap: wrote link.filelist with $(wc -l < "$EXTRA_OBJDIR/link.filelist") objects"
   fi
   echo "bootstrap: extra per-area compile pass in $EXTRA_OBJDIR"
