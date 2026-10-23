@@ -71,6 +71,7 @@ archives = [
   "build-mockfs-fixture.py",
   # boot progress off with the config above.
   "build-libpthread-kernel.py",
+  "build-verified-root-probe.py",
   # Deliberately absent, each needs a fuxi implementation first (the configs that
   # would use them are off in fuxi_defconfig):
   #   build-fuxi-platform-power.py  (SM8550 PMGR; sheng's is board specific)
