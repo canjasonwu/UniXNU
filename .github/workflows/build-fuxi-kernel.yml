@@ -77,6 +77,14 @@ jobs:
           print("patched MemoryMapLib and BootShim")
           PY
 
+      - name: Select Xcode 16.2
+        # The default Xcode on this image is 15.4; xnu-10063 is a macOS 15 source
+        # and its mig needs the newer toolchain, otherwise UNDReplyServer.c fails
+        # with 'unknown argument: -mach_msg2'.
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.2.app
+          xcodebuild -version
+
       - name: Install host tools
         run: |
           set -e
