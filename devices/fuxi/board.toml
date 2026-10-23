@@ -69,7 +69,7 @@ archives = [
   # native-ram-block bindings disabled with the config.
   # native-virtio-block bindings disabled with the config.
   "build-mockfs-fixture.py",
-  "build-boot-progress.py",
+  # boot progress off with the config above.
   "build-libpthread-kernel.py",
   # Deliberately absent, each needs a fuxi implementation first (the configs that
   # would use them are off in fuxi_defconfig):
