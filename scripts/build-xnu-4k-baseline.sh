@@ -761,6 +761,27 @@ make -C .cache/xnu-work ${XNU_MAKE_FLAGS:-} ${XNU_MAKE_TARGETS:-"${XNU_BUILD_TAR
   BUILD_LTO=0 BOUND_CHECKS=0 BUILD_WERROR="${XNU_BUILD_WERROR:-0}" MAKEJOBS=-j"${JOBS:-4}" \
   CFLAGS_EXTRA="$EXTRA_CFLAGS" "${EXTRA_MAKE_ARGS[@]}" \
   OBJROOT="$ROOT/build/xnu/ios-obj" SYMROOT="$ROOT/build/xnu/ios-sym" DSTROOT="$ROOT/build/xnu/ios-dst"
+# Record pass only: the aggregate build stops at the first area whose link fails,
+# and the archive builders need the records of osfmk and iokit as well. The
+# per-area recursive targets exist in the OBJROOT directory, not at the top, so
+# ask for them there one by one and ignore the link failures.
+if [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]; then
+  EXTRA_OBJDIR="$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837"
+  echo "bootstrap: extra per-area compile pass in $EXTRA_OBJDIR"
+  ls "$EXTRA_OBJDIR" 2>/dev/null | head -8
+  if [ -f "$EXTRA_OBJDIR/Makefile" ]; then
+    for AREA in osfmk iokit libkern pexpert san security libsa bsd; do
+      echo "bootstrap: compiling area $AREA"
+      make -C "$EXTRA_OBJDIR" -k "build_all_recurse_into_$AREA" \
+        CURRENT_KERNEL_CONFIG=DEVELOPMENT CURRENT_ARCH_CONFIG=ARM64 \
+        CURRENT_MACHINE_CONFIG=BCM2837 'CURRENT_BUILD_CONFIG=DEVELOPMENT^ARM64^BCM2837' \
+        > /tmp/bootstrap-area-$AREA.log 2>&1 || echo "bootstrap: area $AREA stopped (expected at the link)"
+      tail -3 /tmp/bootstrap-area-$AREA.log 2>/dev/null | sed "s/^/    [$AREA] /"
+    done
+  else
+    echo "bootstrap: no Makefile in $EXTRA_OBJDIR, per-area pass skipped"
+  fi
+fi
 if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$CRYPTO_BOOTSTRAP_MODE" = source ]; then
   python3 scripts/seal-source-crypto-kernel.py \
     build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf
