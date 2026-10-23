@@ -791,6 +791,14 @@ make -C .cache/xnu-work ${XNU_MAKE_FLAGS:-} ${XNU_MAKE_TARGETS:-"${XNU_BUILD_TAR
 # ask for them there one by one and ignore the link failures.
 if [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]; then
   EXTRA_OBJDIR="$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837"
+  # link.filelist is written by the final kernel link recipe, which only runs once
+  # every area linked successfully. It is just the list of kernel objects, so write
+  # it here when the link never got that far; the archive builders run nm over it to
+  # learn which symbols the kernel itself defines.
+  if [ ! -f "$EXTRA_OBJDIR/link.filelist" ]; then
+    find "$EXTRA_OBJDIR" -name '*.o' -type f | sort > "$EXTRA_OBJDIR/link.filelist"
+    echo "bootstrap: wrote link.filelist with $(wc -l < "$EXTRA_OBJDIR/link.filelist") objects"
+  fi
   echo "bootstrap: extra per-area compile pass in $EXTRA_OBJDIR"
   ls "$EXTRA_OBJDIR" 2>/dev/null | head -8
   if [ -f "$EXTRA_OBJDIR/Makefile" ]; then
