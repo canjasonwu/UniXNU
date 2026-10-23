@@ -64,10 +64,10 @@ archives = [
   "build-arm-driver.py NativeAES",
   "build-native-aes-bindings.py",
   # NativeUfs is disabled (see fuxi_defconfig); its IOKit storage header is absent.
-  "build-arm-driver.py NativeVirtioBlock",
-  "build-arm-driver.py NativeRamBlock",
-  "build-native-virtio-bindings.py --component NativeRamBlock --directory build/native-ram-block",
-  "build-native-virtio-bindings.py --component NativeVirtioBlock",
+  # NativeVirtioBlock disabled together with its config.
+  # NativeRamBlock disabled together with its config.
+  # native-ram-block bindings disabled with the config.
+  # native-virtio-block bindings disabled with the config.
   "build-mockfs-fixture.py",
   "build-boot-progress.py",
   "build-libpthread-kernel.py",
