@@ -20,6 +20,10 @@ on:
         description: 'unique-chip-id seed (8 bytes hex); the ADT needs it, the value is device specific'
         default: '0x1234567890abcdef'
 
+concurrency:
+  group: fuxi-kernel
+  cancel-in-progress: false
+
 jobs:
   kernel:
     runs-on: macos-14
