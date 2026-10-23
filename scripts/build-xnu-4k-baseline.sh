@@ -768,7 +768,10 @@ if [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]; then
       *.a|*.o)
         if [ ! -f "$STUB_VALUE" ]; then
           mkdir -p "$(dirname "$STUB_VALUE")"
-          : > "$STUB_VALUE"
+          case "$STUB_VALUE" in
+            *.a) xcrun libtool -static -o "$STUB_VALUE" 2>/dev/null || : > "$STUB_VALUE" ;;
+            *) : > "$STUB_VALUE" ;;
+          esac
           echo "bootstrap placeholder: $STUB_VAR=$STUB_VALUE"
         fi
         ;;
