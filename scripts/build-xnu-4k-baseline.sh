@@ -780,7 +780,14 @@ fi
 # forced include limited to C++ puts the declaration back without touching C files.
 IOKIT_RPC_SHIM="$ROOT/build/iokit-iig-shim.h"
 mkdir -p "$(dirname "$IOKIT_RPC_SHIM")"
-printf '%s\n' '#ifdef __cplusplus' '#include <IOKit/IORPC.h>' '#endif' > "$IOKIT_RPC_SHIM"
+{
+  printf '%s\n' '#ifdef __cplusplus'
+  printf '%s\n' '#include <IOKit/IORPC.h>'
+  printf '%s\n' '/* IORPC.h declares this only outside the kernel, but the iig generated'
+  printf '%s\n' '   sources call it and the kernel defines it in IOUserServer.cpp. */'
+  printf '%s\n' 'extern "C" IORPCMessage *IORPCMessageFromMach(IORPCMessageMach * msg, bool reply);'
+  printf '%s\n' '#endif'
+} > "$IOKIT_RPC_SHIM"
 EXTRA_CFLAGS="$EXTRA_CFLAGS -I$ROOT/.cache/xnu-work/iokit -include $IOKIT_RPC_SHIM"
 make -C .cache/xnu-work ${XNU_MAKE_FLAGS:-} ${XNU_MAKE_TARGETS:-"${XNU_BUILD_TARGET:-build}"} SDKROOT="${XNU_SDKROOT:-iphoneos}" ARCH_CONFIGS=ARM64 \
   MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS=DEVELOPMENT \
