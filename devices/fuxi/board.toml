@@ -180,9 +180,11 @@ volume = "FUXIESP"
 size_mib = 192
 loader = "firmware"
 title = "fuxi first boot: source 4K XNU to console"
-# Off until scripts/patch-xnu-entry-probe.py is ported: the payload step applies it
-# for panic_screen and the fuxi tree does not have that script yet.
-panic_screen = false
+# The payload step patches the kernel copy so a panic draws its message on the
+# frame buffer: without a serial console this is the only visible early failure.
+# scripts/patch-xnu-entry-probe.py finds the cave and the panic symbols in the
+# built kernel instead of assuming sheng's layout.
+panic_screen = true
 # 30 s instead of the default 3 s: the first bring-up needs the menu to stay on
 # screen long enough to photograph the entry list.
 timeout = 600
