@@ -70,7 +70,10 @@ command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unknown-warning-option', '-
                 '-Wno-c99-designator', '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
                 '-Wno-unnecessary-virtual-specifier', '-I', str(ROOT / '.cache/xnu-work/osfmk')])
 if component in ('NativeVirtioBlock', 'NativeRamBlock', 'NativeUfs'):
-    command += ['-I', str(ROOT / 'build/storage-abi/include')]
+    # The storage drivers include <IOKit/storage/...>, which lives in the xnu iokit
+    # tree; the record only carries the osfmk include path.
+    command += ['-I', str(ROOT / '.cache/xnu-work/iokit'),
+                '-I', str(ROOT / 'build/storage-abi/include')]
     if args.verified_root:
         command += ['-I', str(ROOT / 'kits/VerifiedRoot/include'), '-DNATIVE_VERIFIED_BLOCK=1']
     if args.negative_verified_block:
