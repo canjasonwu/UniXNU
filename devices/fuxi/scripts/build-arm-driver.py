@@ -63,7 +63,10 @@ while index < len(arguments):
     elif not value.startswith('-W'):
         command.append(value)
     index += 1
-command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
+# -Wno-unknown-warning-option keeps older toolchains from failing on the flags below:
+# Apple clang 16 does not know -Wno-unnecessary-virtual-specifier and -Werror turns
+# that into a hard error.
+command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unknown-warning-option', '-Wno-unused-parameter',
                 '-Wno-c99-designator', '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
                 '-Wno-unnecessary-virtual-specifier', '-I', str(ROOT / '.cache/xnu-work/osfmk')])
 if component in ('NativeVirtioBlock', 'NativeRamBlock', 'NativeUfs'):
