@@ -134,6 +134,7 @@ jobs:
           # job workspace, so no cache is involved.
           echo '=== pass 1: compile records ==='
           python3 ./unixnu build kernel 2>&1 | tee kernel-build-pass1.log || true
+          cp out/fuxi/logs/kernel-bootstrap.log out/fuxi/logs/kernel-bootstrap-pass1.log || true
           echo '=== pass 2: archives and link ==='
           python3 ./unixnu build kernel 2>&1 | tee kernel-build.log
 
