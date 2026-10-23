@@ -36,6 +36,10 @@ on:
         description: 'reset the device after N seconds (0 = no watchdog); used for unattended test loops'
         default: '0'
 
+concurrency:
+  group: fuxi-firmware
+  cancel-in-progress: false
+
 jobs:
   firmware:
     runs-on: ubuntu-latest
