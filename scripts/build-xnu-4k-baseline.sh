@@ -784,7 +784,8 @@ make -C .cache/xnu-work ${XNU_MAKE_FLAGS:-} ${XNU_MAKE_TARGETS:-"${XNU_BUILD_TAR
   RC_DARWIN_KERNEL_VERSION="$XNU_DARWIN" RC_ProjectSourceVersion="$XNU_VERSION" \
   BUILD_LTO=0 BOUND_CHECKS=0 BUILD_WERROR="${XNU_BUILD_WERROR:-0}" MAKEJOBS=-j"${JOBS:-4}" \
   CFLAGS_EXTRA="$EXTRA_CFLAGS" "${EXTRA_MAKE_ARGS[@]}" \
-  OBJROOT="$ROOT/build/xnu/ios-obj" SYMROOT="$ROOT/build/xnu/ios-sym" DSTROOT="$ROOT/build/xnu/ios-dst"
+  OBJROOT="$ROOT/build/xnu/ios-obj" SYMROOT="$ROOT/build/xnu/ios-sym" DSTROOT="$ROOT/build/xnu/ios-dst" \
+  || [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]
 # Record pass only: the aggregate build stops at the first area whose link fails,
 # and the archive builders need the records of osfmk and iokit as well. The
 # per-area recursive targets exist in the OBJROOT directory, not at the top, so
