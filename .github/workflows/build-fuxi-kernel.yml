@@ -140,14 +140,19 @@ jobs:
           python3 - <<'PYEOF'
           import sys
           from pathlib import Path
-          fdf = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
-          t = fdf.read_text(encoding="utf-8")
-          anchor = "  !include QcomPkg/Extra.fdf.inc"
-          if anchor not in t:
-              sys.exit("FDF anchor not found")
+          dxe = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc")
+          t = dxe.read_text(encoding="utf-8")
+          # The FDF pulls DXE.inc in before QcomPkg/Extra.fdf.inc, and DarwinBoot sits
+          # in that list and blocks in its menu, so a driver appended to the FDF tail
+          # would never be dispatched. Place the watchdog next to TimerDxe instead: it
+          # needs the timer protocol, and it has to be armed before anything can block.
+          anchor = "  INF ArmPkg/Drivers/TimerDxe/TimerDxe.inf"
           if "FuxiWatchdog" not in t:
-              t = t.replace(anchor, "  INF fuxiPkg/Drivers/FuxiWatchdog/FuxiWatchdog.inf\n\n" + anchor, 1)
-              fdf.write_text(t, encoding="utf-8")
+              if anchor not in t:
+                  sys.exit("DXE.inc TimerDxe anchor not found")
+              t = t.replace(anchor, anchor + "\n  INF fuxiPkg/Drivers/FuxiWatchdog/FuxiWatchdog.inf", 1)
+              dxe.write_text(t, encoding="utf-8")
+
           dsc = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc")
           t = dsc.read_text(encoding="utf-8")
           key = "fuxiPkg/Drivers/FuxiKeyInputDxe/FuxiKeyInputDxe.inf"
@@ -156,9 +161,9 @@ jobs:
                   sys.exit("fuxi.dsc anchor not found")
               t = t.replace(key, key + "\n  fuxiPkg/Drivers/FuxiWatchdog/FuxiWatchdog.inf", 1)
               dsc.write_text(t, encoding="utf-8")
-          print("FDF and DSC updated")
+          print("DXE.inc and DSC updated")
           PYEOF
-          grep -n 'FuxiWatchdog' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
+          grep -n 'FuxiWatchdog' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
 
       - name: Select Xcode 16.2
         # The default Xcode on this image is 15.4; xnu-10063 is a macOS 15 source
