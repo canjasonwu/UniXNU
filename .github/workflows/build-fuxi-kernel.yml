@@ -123,8 +123,18 @@ jobs:
           # delay and resets through PSCI instead of returning. The host decodes the
           # reset time as 5 + 30*DiskIo + 120*Fs seconds, which says whether the payload
           # volume was published and whether its filesystem got mounted, with no eyes.
-          sed -i 's|^#define FUXI_REPORT_RESULT  0|#define FUXI_REPORT_RESULT  1|' \
-            uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+          python3 - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          src = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c")
+          t = src.read_text(encoding="utf-8")
+          t2, n = __import__("re").subn(r"(?m)^#define FUXI_REPORT_RESULT[ \t]+0[ \t]*$",
+                                        "#define FUXI_REPORT_RESULT  1", t)
+          if n == 0 and "#define FUXI_REPORT_RESULT  1" not in t2:
+              sys.exit("FUXI_REPORT_RESULT switch not found")
+          src.write_text(t2, encoding="utf-8")
+          print("reporting mode enabled")
+          PYEOF
           grep -n 'FUXI_REPORT_RESULT' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c | head -3
           grep -n 'no FAT volume' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
 
