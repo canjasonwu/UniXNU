@@ -121,6 +121,37 @@ jobs:
              uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
           grep -n 'no FAT volume' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
 
+      - name: Install the test watchdog driver
+        # A finished or failed run leaves the phone on the UEFI panel, where there is
+        # no USB function and nothing on the host can reach it; every experiment would
+        # then need someone to hold the power button. The watchdog resets through PSCI
+        # after a fixed delay, so the phone returns to Android by itself and the host
+        # can start the next image unattended.
+        run: |
+          set -e
+          WATCHDOG_SECONDS=90
+          driver=uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiWatchdog
+          mkdir -p "$driver"
+          cp devices/fuxi/watchdog/FuxiWatchdog.inf "$driver/"
+          ticks=$(( WATCHDOG_SECONDS * 10000000 ))
+          sed "s|^#define WD_TICKS .*|#define WD_TICKS  ${ticks}ULL|" \
+            devices/fuxi/watchdog/FuxiWatchdog.c > "$driver/FuxiWatchdog.c"
+          grep -n 'WD_TICKS' "$driver/FuxiWatchdog.c" | head -2
+          python3 - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          fdf = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf")
+          t = fdf.read_text(encoding="utf-8")
+          anchor = "  !include QcomPkg/Extra.fdf.inc"
+          if anchor not in t:
+              sys.exit("FDF anchor not found")
+          if "FuxiWatchdog" not in t:
+              t = t.replace(anchor, "  INF fuxiPkg/Drivers/FuxiWatchdog/FuxiWatchdog.inf\n\n" + anchor, 1)
+              fdf.write_text(t, encoding="utf-8")
+          print("FDF updated")
+          PYEOF
+          grep -n 'FuxiWatchdog' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+
       - name: Select Xcode 16.2
         # The default Xcode on this image is 15.4; xnu-10063 is a macOS 15 source
         # and its mig needs the newer toolchain, otherwise UNDReplyServer.c fails
