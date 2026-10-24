@@ -1,0 +1,63 @@
+# Build the fuxi XNU kernel on a Linux host.
+#
+# The full pipeline (payload, firmware, boot image) stays in build-fuxi-kernel.yml
+# on macOS, because the firmware is built from the uefi-fuxi tree with EDK II.
+# The kernel step itself now has an official Linux path upstream (UniXNU PR #100,
+# scripts/linux), merged here: setup-toolchain.py builds clang with the xnu
+# builtin types, cctools-port, mig, iig and lzfse, and the driver runs
+# scripts/linux/prepare-xnu.py before building. Same sources, same patches, same
+# symbols and objects as the macOS build; code segment sizes differ by a few
+# percent because the compilers differ.
+
+name: build fuxi kernel on linux
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: fuxi-kernel-linux
+  cancel-in-progress: false
+
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout UniXNU fork
+        uses: actions/checkout@v4
+
+      - name: Install the Linux toolchain
+        # Writes /opt/unixnu-linux and the shims xnu's makefiles expect. It builds
+        # clang from a pinned LLVM commit, so it takes tens of minutes; every run
+        # pays it until the toolchain is cached.
+        run: sudo python3 scripts/linux/setup-toolchain.py
+
+      - name: defconfig
+        run: python3 ./unixnu defconfig fuxi_defconfig -D devices/fuxi
+
+      - name: fetch sources
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          python3 ./unixnu fetch 2>&1 | tee prebuild.log
+
+      - name: build kernel
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          python3 ./unixnu build kernel 2>&1 | tee kernel-build.log
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuxi-kernel-linux-${{ github.run_id }}
+          path: |
+            out/fuxi/kernel/kernel.macho
+            out/fuxi/kernel/*.json
+            kernel-build.log
+            prebuild.log
+            out/fuxi/logs/**
+          if-no-files-found: warn

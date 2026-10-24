@@ -10,6 +10,8 @@ chip_id, board_id, and the components the steps use.
 import hashlib
 import io
 import json
+import os
+import platform
 import plistlib
 import struct
 import subprocess
@@ -202,14 +204,20 @@ def kernelcache(ctx, source):
     pin = spec.get('kernelcache_sha256')
     if out.is_file() and (pin is None or sha256_file(out) == pin):
         return out
-    tool('compression_tool', 'macOS /usr/bin/compression_tool decodes the LZFSE kernelcache')
+    if platform.system() == 'Linux':
+        # Apple's reference LZFSE tool, which scripts/linux/setup-toolchain.py installs.
+        lzfse = Path(os.environ.get('UNIXNU_TOOLCHAIN', '/opt/unixnu-linux')) / 'bin/lzfse'
+        decode = [str(lzfse) if lzfse.is_file() else tool('lzfse', 'run sudo scripts/linux/setup-toolchain.py'), '-decode']
+    else:
+        tool('compression_tool', 'macOS /usr/bin/compression_tool decodes the LZFSE kernelcache')
+        decode = ['/usr/bin/compression_tool', '-decode', '-a', 'lzfse']
     source.cache.mkdir(parents=True, exist_ok=True)
     payload = im4p_payload(source.read('KernelCache'))
     packed, raw = source.cache / 'kernelcache.lzfse', source.cache / 'kernelcache.fat'
     packed.write_bytes(payload)
-    result = subprocess.run(['/usr/bin/compression_tool', '-decode', '-a', 'lzfse', '-i', packed, '-o', raw], capture_output=True, text=True)
+    result = subprocess.run([*decode, '-i', packed, '-o', raw], capture_output=True, text=True)
     if result.returncode:
-        raise Error(f'compression_tool failed: {result.stderr.strip()}')
+        raise Error(f'{Path(decode[0]).name} failed: {result.stderr.strip()}')
     fat = raw.read_bytes()
     if fat[:4] == b'\xca\xfe\xba\xbe':
         count = struct.unpack('>I', fat[4:8])[0]

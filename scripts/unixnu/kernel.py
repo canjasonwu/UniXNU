@@ -1,5 +1,6 @@
 """XNU kernel: build from the patched Apple source, then prelink against the original kernelcache."""
 import os
+import platform
 import shlex
 from pathlib import Path
 
@@ -37,11 +38,37 @@ def version_env(modules):
     return env
 
 
-def toolchain_path():
+def toolchain_path(path=None):
     """PATH with the Homebrew LLVM and LLD first, as the archive builders expect."""
     extra = [d for d in ('/opt/homebrew/opt/llvm/bin', '/opt/homebrew/opt/lld/bin', '/usr/local/opt/llvm/bin', '/usr/local/opt/lld/bin')
              if Path(d).is_dir()]
-    return os.pathsep.join(extra + [os.environ.get('PATH', '')])
+    return os.pathsep.join(extra + [path if path is not None else os.environ.get('PATH', '')])
+
+
+def linux_env(ctx):
+    """Environment of the kernel step on a Linux host, with the toolchain of scripts/linux/setup-toolchain.py.
+
+    The xcrun shim answers every --sdk query with the fakeroot this build makes. The target is plain arm64 for
+    iOS 17, so the clang wrapper adds only the flag that keeps C++ static destructors in __mod_term_func.
+    CCC_OVERRIDE_OPTIONS (read by the clang driver itself, so also by the archive builders that replay xnu's
+    compile records) turns off two warnings that upstream clang has and Apple clang does not; the builders compile
+    with -Werror.
+    """
+    toolchain = Path(os.environ.get('UNIXNU_TOOLCHAIN', '/opt/unixnu-linux'))
+    clt, xctoolchain = toolchain / 'CommandLineTools/usr', toolchain / 'XcodeDefault.xctoolchain/usr'
+    for path in (toolchain / 'llvm/bin/clang', clt / 'bin/ld', clt / 'bin/xnu-host-cc', clt / 'libexec/migcom',
+                 xctoolchain / 'bin/iig', Path('/usr/bin/xcrun'), toolchain / 'bin/lzfse'):
+        if not path.exists():
+            raise Error(f'{path} missing; run "sudo scripts/linux/setup-toolchain.py {toolchain}"')
+    fakeroot = ctx.tree / '.cache/fakeroot'
+    return {'PATH': os.pathsep.join([str(clt / 'bin'), str(toolchain / 'bin'), os.environ.get('PATH', '')]),
+            'LC_ALL': 'C', 'CLT_PREFIX': str(clt), 'XCTOOLCHAIN_PREFIX': str(xctoolchain),
+            'XNU_TOOLCHAIN_BIN': f'{clt / "bin"} {xctoolchain / "bin"}',
+            'UNIXNU_SDKROOT': str(fakeroot), 'UNIXNU_SDK_VERSION': '17.0',
+            'UNIXNU_PLATFORM_PATH': str(fakeroot / 'Platforms/iPhoneOS.platform'),
+            'CROSS_CLANG': str(toolchain / 'llvm/bin/clang'), 'DARWIN_TRIPLE': 'arm64-apple-ios17.0',
+            'CROSS_EXTRA_FLAGS': '-mllvm -disable-atexit-based-global-dtor-lowering',
+            'CCC_OVERRIDE_OPTIONS': '# +-Wno-missing-designated-field-initializers +-Wno-unused-but-set-global'}
 
 
 def build_archives(ctx, env, required=True):
@@ -51,7 +78,7 @@ def build_archives(ctx, env, required=True):
     them read the compile records that an XNU pass leaves behind.
     """
     entries = ctx.board.get('kernel', {}).get('archives', [])
-    env = dict(env, PATH=toolchain_path())
+    env = dict(env, PATH=toolchain_path(env.get('PATH')))
     for index, entry in enumerate(entries, 1):
         parts = shlex.split(entry)
         script = ctx.tree / 'scripts' / parts[0]
@@ -77,13 +104,18 @@ def build_archives(ctx, env, required=True):
 
 def build(ctx, modules):
     log('kernel: XNU')
-    for name in ('git', 'make', 'clang', 'cmake', 'ninja', 'unifdef'):
-        tool(name, 'brew install ' + name)
-    tool('xcodebuild', 'the kernel step builds with the Xcode iphoneos SDK')
     script = ctx.tree / 'scripts/build-xnu-4k-baseline.sh'
     if not script.is_file():
         raise Error(f'{script} missing')
     env = dict(os.environ)
+    if platform.system() == 'Linux':
+        for name in ('git', 'make', 'cmake', 'ninja', 'unifdef'):
+            tool(name, 'run sudo scripts/linux/setup-toolchain.py')
+        env.update(linux_env(ctx))
+    else:
+        for name in ('git', 'make', 'clang', 'cmake', 'ninja', 'unifdef'):
+            tool(name, 'brew install ' + name)
+        tool('xcodebuild', 'the kernel step builds with the Xcode iphoneos SDK')
     env.update(xnu_env(ctx))
     env.update(version_env(modules))
     env['JOBS'] = str(ctx.jobs)

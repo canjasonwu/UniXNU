@@ -202,8 +202,12 @@ def cmd_clean(ctx):
 def main(argv=None):
     if sys.version_info < (3, 11):
         sys.exit('unixnu needs Python 3.11 or newer')
-    if platform.system() != 'Darwin':
-        print('unixnu: developed and tested on macOS only; the kernel step needs Xcode and --skip-setup needs hdiutil', file=sys.stderr)
+    if platform.system() == 'Linux':
+        print('unixnu: on Linux the kernel step uses the toolchain of scripts/linux/setup-toolchain.py; '
+              'userdata and --skip-setup need macOS hdiutil', file=sys.stderr)
+    elif platform.system() != 'Darwin':
+        print('unixnu: developed and tested on macOS and Linux only; the kernel step needs Xcode or the Linux toolchain, '
+              'and --skip-setup needs hdiutil', file=sys.stderr)
     args = parser().parse_args(argv)
     try:
         ctx = Context(args)
