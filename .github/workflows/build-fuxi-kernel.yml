@@ -148,9 +148,17 @@ jobs:
           if "FuxiWatchdog" not in t:
               t = t.replace(anchor, "  INF fuxiPkg/Drivers/FuxiWatchdog/FuxiWatchdog.inf\n\n" + anchor, 1)
               fdf.write_text(t, encoding="utf-8")
-          print("FDF updated")
+          dsc = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc")
+          t = dsc.read_text(encoding="utf-8")
+          key = "fuxiPkg/Drivers/FuxiKeyInputDxe/FuxiKeyInputDxe.inf"
+          if "FuxiWatchdog" not in t:
+              if key not in t:
+                  sys.exit("fuxi.dsc anchor not found")
+              t = t.replace(key, key + "\n  fuxiPkg/Drivers/FuxiWatchdog/FuxiWatchdog.inf", 1)
+              dsc.write_text(t, encoding="utf-8")
+          print("FDF and DSC updated")
           PYEOF
-          grep -n 'FuxiWatchdog' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf
+          grep -n 'FuxiWatchdog' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.fdf uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
 
       - name: Select Xcode 16.2
         # The default Xcode on this image is 15.4; xnu-10063 is a macOS 15 source
