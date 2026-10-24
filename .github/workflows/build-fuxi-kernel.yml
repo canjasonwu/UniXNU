@@ -59,6 +59,14 @@ jobs:
           before = t
           t = re.sub(r'[ \t]*\{"FD Reserved".*?\},\r?\n', '', t)
           t = re.sub(r'("UEFI FD",\s*)0xA7100000,\s*0x00300000', r'\g<1>0xA7000000, 0x00400000', t)
+
+          # DarwinBoot asks the memory map for one contiguous conventional run the size
+          # of the ADT window and AllocatePages(AllocateAddress) inside it. The vendor
+          # table reserves exactly that run for the kernel at 0xA8000000, so the loader
+          # can never see it. Publish it as conventional memory instead.
+          t, window = re.subn(r'(\{"Kernel",\s*0xA8000000,\s*0x10000000,[^}]*?)\bReserv\b', r'\1Conv', t)
+          if window == 0 and not re.search(r'\{"Kernel",\s*0xA8000000,\s*0x10000000,[^}]*?Conv\b', t):
+              sys.exit("Kernel window row not found in MemoryMapLib")
           if t == before:
               sys.exit("MemoryMapLib patch did not change anything")
           mm.write_text(t, encoding="utf-8")
