@@ -81,6 +81,46 @@ jobs:
           print("patched MemoryMapLib and BootShim")
           PY
 
+      - name: Enable the boot memory driver
+        # The kernel pipeline builds the firmware straight from the uefi-fuxi branch,
+        # which publishes no payload volume, so the boot manager reports "no boot
+        # entry" while the payload sits in the boot image. Turn FuxiBootMemoryDxe on
+        # exactly the way the payload test workflow does; the next step replaces its
+        # source with the version that can actually find the volume in the initrd.
+        run: |
+          python3 - <<'PYEOF'
+          import re, sys
+          from pathlib import Path
+
+          dxe = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc")
+          t = dxe.read_text(encoding="utf-8")
+          pat = re.compile(r'(?m)^[ \t]*#[ \t]*INF[ \t]+fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe\.inf[ \t]*$')
+          t2, n = pat.subn("  INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf", t)
+          if n == 0 and "  INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf" not in t2:
+              sys.exit("DXE.inc: FuxiBootMemoryDxe line not found")
+          dxe.write_text(t2, encoding="utf-8")
+
+          dsc = Path("uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc")
+          t = dsc.read_text(encoding="utf-8")
+          pat = re.compile(r'(?m)^[ \t]*#[ \t]*fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe\.inf[ \t]*$')
+          t2, n = pat.subn("  fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf", t)
+          if n == 0 and "  fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf" not in t2:
+              sys.exit("fuxi.dsc: FuxiBootMemoryDxe line not found")
+          dsc.write_text(t2, encoding="utf-8")
+          print("FuxiBootMemoryDxe enabled")
+          PYEOF
+          grep -n 'FuxiBootMemoryDxe' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc | grep -v '^.*:#' || true
+
+      - name: Make the initrd discovery scan for the FAT volume
+        # ABL reports the initrd range as 37 MiB and not sector aligned, so the stock
+        # driver rejects it and no block device ever appears. The override scans that
+        # range sector by sector for a FAT boot sector and publishes the volume its
+        # BPB describes. Kept as a full file in devices/fuxi/driver-overrides/.
+        run: |
+          cp devices/fuxi/driver-overrides/FuxiBootMemoryDxe.c \
+             uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+          grep -n 'no FAT volume' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+
       - name: Select Xcode 16.2
         # The default Xcode on this image is 15.4; xnu-10063 is a macOS 15 source
         # and its mig needs the newer toolchain, otherwise UNDReplyServer.c fails
