@@ -400,9 +400,9 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
 #define FUXI_REPORT_RESULT  0
 #endif
 
-STATIC BOOLEAN  mFatPublished  = FALSE;
-STATIC EFI_STATUS  mPublishStatus = EFI_NOT_READY;
-STATIC EFI_HANDLE  mDeviceHandle = NULL;
+STATIC volatile BOOLEAN  mFatPublished  = FALSE;
+STATIC volatile EFI_STATUS  mPublishStatus = EFI_NOT_READY;
+STATIC volatile EFI_HANDLE  mDeviceHandle = NULL;
 
 STATIC
 BOOLEAN
