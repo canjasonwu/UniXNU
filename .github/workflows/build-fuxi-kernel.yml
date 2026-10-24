@@ -119,6 +119,13 @@ jobs:
         run: |
           cp devices/fuxi/driver-overrides/FuxiBootMemoryDxe.c \
              uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+          # Reporting mode: the driver prints what it published, stalls for an encoded
+          # delay and resets through PSCI instead of returning. The host decodes the
+          # reset time as 5 + 30*DiskIo + 120*Fs seconds, which says whether the payload
+          # volume was published and whether its filesystem got mounted, with no eyes.
+          sed -i 's|^#define FUXI_REPORT_RESULT  0|#define FUXI_REPORT_RESULT  1|' \
+            uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
+          grep -n 'FUXI_REPORT_RESULT' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c | head -3
           grep -n 'no FAT volume' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.c
 
       - name: Install the test watchdog driver
