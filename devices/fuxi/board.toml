@@ -74,7 +74,7 @@ archives = [
   # verified root probe off with its config.
   # Deliberately absent, each needs a fuxi implementation first (the configs that
   # would use them are off in fuxi_defconfig):
-  #   build-fuxi-platform-power.py  (SM8550 PMGR; sheng's is board specific)
+  "build-fuxi-platform-power.py",
   #   build-native-adreno-kits.py   (CONFIG_XNU_NATIVE_ADRENO)
   #   build-arm-driver.py NativeAdreno / build-native-adreno-accelerator.py
   #   build-native-legacy-display.py (CONFIG_XNU_NATIVE_LEGACY_DISPLAY)
