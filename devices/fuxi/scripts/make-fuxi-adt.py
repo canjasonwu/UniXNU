@@ -197,9 +197,11 @@ def main():
               # IOClass AppleBringUpPMGR, IONameMatch "pmgr1,bring-up", provider
               # AppleARMIODevice. Nothing on this phone publishes that node, so ApplePMGR
               # never starts, no PMGR service exists, and AMFI panics with "No PMGR?".
-              # Both name and compatible carry the match string, and initRegGroups()
+              # IONameMatch matches the EDT node name itself: Apple's own personalities use
+              # node names as match values (nor-flash,cfi, nvram,nor, eeprom,i2c, sacm), so
+              # the node key has to be the match string and not just carry it. initRegGroups()
               # requires the two register offsets or it panics on a missing EDT property.
-              node('pmgr1', [('name', b'pmgr1,bring-up\0'),
+              node('pmgr1,bring-up', [('name', b'pmgr1,bring-up\0'),
                              ('compatible', b'pmgr1,bring-up\0'),
                              ('misc-cores-offset', struct.pack('<I', 0)),
                              ('misc-acg-offset', struct.pack('<I', 0))])]),
