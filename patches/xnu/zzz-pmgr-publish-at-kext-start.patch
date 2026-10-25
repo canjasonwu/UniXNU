@@ -1,0 +1,21 @@
+diff --git a/libkern/c++/OSKext.cpp b/libkern/c++/OSKext.cpp
+index becc2f5..023ae6d 100644
+--- a/libkern/c++/OSKext.cpp
++++ b/libkern/c++/OSKext.cpp
+@@ -8358,6 +8358,16 @@ OSKext::OSKextLogDriverKitInfoLoad(OSKext *kext)
+ OSReturn
+ OSKext::start(bool startDependenciesFlag)
+ {
++#if defined(XNU_SHENG_PMGR) && XNU_SHENG_PMGR
++	/* The AMFI early security initialiser runs from this path (see
++	 * kits/NativePrelink/patches/xnu-10063.141.1-security-init.patch) and needs
++	 * an ApplePMGRNub service, whose class is defined by com.apple.driver.ApplePMGR.
++	 * By the time a kext is started its dependencies are loaded, so publish the
++	 * nub here, before AMFI looks for it. The call is idempotent and retries on
++	 * later starts while the class is still missing. */
++	extern void sheng_pmgr_publish_nub(void);
++	sheng_pmgr_publish_nub();
++#endif
+ 	OSReturn                            result = kOSReturnError;
+ 	kern_return_t                       (* startfunc)(kmod_info_t *, void *);
+ 	unsigned int                        i, count;
