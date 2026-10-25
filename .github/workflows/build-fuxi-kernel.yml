@@ -73,10 +73,10 @@ jobs:
           # vendor reservations sit back to back from 0x89800000 to 0xA7000000;
           # releasing them yields a single 490 MiB span the loader can allocate from.
           for row in ("PIL Reserved", "Display Demura", "RSRV2", "DBI Dump"):
-              pattern = r'(\{"' + re.escape(row) + r'",[^}]*?)Reserv'
-              t, released = re.subn(pattern, r'Conv', t)
+              pattern = r'(\{"' + re.escape(row) + r'",[^}]*?)\bReserv\b'
+              t, released = re.subn(pattern, r'\1Conv', t)
               if released == 0 and not re.search(
-                      r'\{"' + re.escape(row) + r'",[^}]*?Conv', t):
+                      r'\{"' + re.escape(row) + r'",[^}]*?Conv\b', t):
                   sys.exit("reservation row not found: " + row)
           if t == before:
               sys.exit("MemoryMapLib patch did not change anything")
