@@ -197,22 +197,12 @@ def main():
               # IOClass AppleBringUpPMGR, IONameMatch "pmgr1,bring-up", provider
               # AppleARMIODevice. Nothing on this phone publishes that node, so ApplePMGR
               # never starts, no PMGR service exists, and AMFI panics with "No PMGR?".
-              # The match string goes in both keys a matcher may consult; no reg, the
-              # bring-up class does not need a register window to publish.
-              # com.apple.driver.ApplePMGR has exactly one personality in the kernelcache:
-              # IOClass AppleBringUpPMGR, IONameMatch "pmgr1,bring-up", provider
-              # AppleARMIODevice. Nothing on this phone publishes that node, so ApplePMGR
-              # never starts, no PMGR service exists, and AMFI panics with "No PMGR?".
-              # Both name and compatible carry the match string; AppleBringUpPMGR's
-              # initRegGroups() also requires the two register offsets below or it panics
-              # with "Missing EDT property".
+              # Both name and compatible carry the match string, and initRegGroups()
+              # requires the two register offsets or it panics on a missing EDT property.
               node('pmgr1', [('name', b'pmgr1,bring-up\0'),
                              ('compatible', b'pmgr1,bring-up\0'),
                              ('misc-cores-offset', struct.pack('<I', 0)),
                              ('misc-acg-offset', struct.pack('<I', 0))])]),
-                             # when these are absent; they are plain register offsets.
-                             ('misc-cores-offset', struct.pack('<I', 0)),
-                             ('misc-acg-offset', struct.pack('<I', 0))]),
     ])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(tree)
