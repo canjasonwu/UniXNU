@@ -240,7 +240,10 @@ chip_id = "207"                       # same SoC family as sheng; unverified her
 # much DRAM exists: AllocateWindow() needs one *contiguous* conventional run of this
 # size, and it reserves exactly this much, so anything larger than the largest free
 # run fails with Out of Resources (measured: 5 GiB asked, 206 MiB available).
-owned_memory_size = "0x10000000"
+# 254 MiB: the loader aligns the window base to 2 MiB and then adds the kernel's own
+# 2 MiB misalignment, so a request exactly equal to the free run is rejected by
+# 0x4000 bytes. The floor below is patched to match.
+owned_memory_size = "0x0FE00000"
 root_match_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"   # from the IPSW, not the board
 cpu_regs = "0,0x100,0x200,0x300,0x400,0x500,0x600,0x700"          # 8 cores
 packed_data_ramdisk = true
