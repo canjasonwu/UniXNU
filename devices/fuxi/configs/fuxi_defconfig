@@ -45,7 +45,10 @@ CONFIG_XNU_BOOT_PROGRESS=n
 
 # Removed from the sheng config, each for a stated reason:
 #
-#   CONFIG_XNU_SHENG_PMGR=y
+# bsd_init calls sheng_pmgr_run() before AMFI starts; without a PMGR service
+# AMFI panics with "No PMGR?". The fuxi side is a stub that only publishes
+# the service (devices/fuxi/platform-power).
+CONFIG_XNU_SHENG_PMGR=y
 #     No fuxi platform-power implementation exists. The kernel has no PMGR path
 #     for this board, and the sheng one is keyed to the tablet's power domains.
 #     TODO: port build-sheng-platform-power.py, then add CONFIG_XNU_FUXI_PMGR and
