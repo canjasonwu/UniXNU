@@ -67,6 +67,17 @@ jobs:
           t, window = re.subn(r'(\{"Kernel",\s*0xA8000000,\s*0x10000000,[^}]*?)\bReserv\b', r'\1Conv', t)
           if window == 0 and not re.search(r'\{"Kernel",\s*0xA8000000,\s*0x10000000,[^}]*?Conv\b', t):
               sys.exit("Kernel window row not found in MemoryMapLib")
+
+          # XNU manages one contiguous physical range and its size is exactly the ADT
+          # window, so the window must come from one big conventional run. These four
+          # vendor reservations sit back to back from 0x89800000 to 0xA7000000;
+          # releasing them yields a single 490 MiB span the loader can allocate from.
+          for row in ("PIL Reserved", "Display Demura", "RSRV2", "DBI Dump"):
+              pattern = r'(\{"' + re.escape(row) + r'",[^}]*?)Reserv'
+              t, released = re.subn(pattern, r'Conv', t)
+              if released == 0 and not re.search(
+                      r'\{"' + re.escape(row) + r'",[^}]*?Conv', t):
+                  sys.exit("reservation row not found: " + row)
           if t == before:
               sys.exit("MemoryMapLib patch did not change anything")
           mm.write_text(t, encoding="utf-8")
