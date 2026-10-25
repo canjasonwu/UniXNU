@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Build the full fuxi boot image locally: firmware patches, kernel, payload,
+# firmware, boot.img. Mirrors .github/workflows/build-fuxi-kernel.yml step for
+# step, so a local build and a CI build produce the same image.
+#
+# Usage:
+#   devices/fuxi/scripts/local-build.sh [--all] [--kernel] [--firmware]
+#
+# With no flags it reuses whatever already exists (kernel.macho, payload.img,
+# firmware) and only rebuilds what is missing. --all forces everything.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/../../.." && pwd)
+cd "$REPO"
+
+CHIP_ID=0x1234567890abcdef
+DO_KERNEL=auto
+DO_FIRMWARE=auto
+DO_PAYLOAD=auto
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --all) DO_KERNEL=1; DO_FIRMWARE=1; DO_PAYLOAD=1; shift ;;
+    --kernel) DO_KERNEL=1; shift ;;
+    --firmware) DO_FIRMWARE=1; shift ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+# The Linux toolchain from scripts/linux/setup-toolchain.py.
+if [ -d /opt/unixnu-linux ]; then
+  export PATH="/opt/unixnu-linux/bin:$PATH"
+fi
+
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+  TOKEN_FILE="${GITHUB_TOKEN_FILE:-/mnt/c/Users/Jason Wu/dsh/fork-add/tools/.gh-token}"
+  if [ -f "$TOKEN_FILE" ]; then
+    GITHUB_TOKEN=$(tr -d ' \r\n' < "$TOKEN_FILE")
+    export GITHUB_TOKEN
+  fi
+fi
+
+step() { echo; echo "=== $* ==="; }
+have() { [ -e "$1" ]; }
+
+step "prepare the firmware tree"
+bash devices/fuxi/scripts/prepare-firmware.sh --uefi uefi-fuxi --watchdog-seconds 90
+
+step "defconfig"
+python3 ./unixnu defconfig fuxi_defconfig -D devices/fuxi
+
+if [ "$DO_KERNEL" != 0 ] || ! have out/fuxi/kernel/kernel.macho; then
+  step "fetch sources"
+  python3 ./unixnu fetch
+
+  step "build kernel, pass 1 (compile records)"
+  python3 ./unixnu build kernel > kernel-build-pass1.log 2>&1 || true
+  cp out/fuxi/logs/kernel-bootstrap.log out/fuxi/logs/kernel-bootstrap-pass1.log 2>/dev/null || true
+
+  step "build kernel, pass 2 (archives and link)"
+  python3 ./unixnu build kernel > kernel-build.log 2>&1
+  tail -3 kernel-build.log
+fi
+
+if [ "$DO_PAYLOAD" != 0 ] || ! have out/fuxi/payload/payload.img; then
+  step "build payload volume"
+  python3 ./unixnu build payload --uefi uefi-fuxi --unique-chip-id "$CHIP_ID" > payload.log 2>&1
+  tail -2 payload.log
+fi
+
+if [ "$DO_FIRMWARE" != 0 ] || ! have uefi-fuxi/Build; then
+  step "build firmware"
+  python3 ./unixnu build firmware --uefi uefi-fuxi --edk2 uefi-fuxi/Mu_Basecore --skip-preflight > firmware-build.log 2>&1
+  tail -3 firmware-build.log
+fi
+
+step "make boot image"
+mkdir -p out/fuxi/boot
+python3 devices/fuxi/make-bootimg.py \
+  --uefi uefi-fuxi \
+  --dtb devices/fuxi/fuxi-live.dtb \
+  --ramdisk out/fuxi/payload/payload.img \
+  --header-version 2 \
+  --dtb-field \
+  --output out/fuxi/boot/boot.img > bootimg.log 2>&1
+
+step "result"
+ls -l out/fuxi/boot/boot.img out/fuxi/kernel/kernel.macho out/fuxi/payload/payload.img 2>/dev/null
+sha256sum out/fuxi/boot/boot.img
