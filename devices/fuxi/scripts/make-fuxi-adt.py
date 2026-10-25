@@ -163,6 +163,14 @@ def main():
         # Suspend/resume is not implemented for this board. Use the original
         # root-domain policy input rather than allowing the CPU to park forever.
         node('defaults', [('sleep-disabled', struct.pack('<I', 1))]),
+        # AppleBringUpPMGR (com.apple.driver.ApplePMGR) matches a device tree node
+        # named pmgr1,bring-up under an AppleARMIODevice provider. Root level first:
+        # the arm-io placement made the loader return to its menu without starting
+        # the kernel at all, so the node is tried as a platform child instead.
+        node('pmgr1,bring-up', [('name', b'pmgr1,bring-up\0'),
+                                ('compatible', b'pmgr1,bring-up\0'),
+                                ('misc-cores-offset', struct.pack('<I', 0)),
+                                ('misc-acg-offset', struct.pack('<I', 0))]),
         node('options', []),
         # The original AppleImage4 panics without a product node. Name and model are the
         # board DT's own strings.
