@@ -8,8 +8,7 @@
 # Usage:
 #   devices/fuxi/scripts/prepare-firmware.sh [--uefi DIR] [--watchdog-seconds N]
 #
-# Run from the repository root. --uefi defaults to uefi-fuxi; pass an empty string
-# to skip the firmware-only patches when there is no checkout.
+# Run from the repository root.
 set -euo pipefail
 
 UEUFI=uefi-fuxi
@@ -21,7 +20,7 @@ while [ $# -gt 0 ]; do
     --uefi=*) UEUFI="${1#*=}"; shift ;;
     --watchdog-seconds) WATCHDOG_SECONDS="$2"; shift 2 ;;
     --watchdog-seconds=*) WATCHDOG_SECONDS="${1#*=}"; shift ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -36,7 +35,6 @@ fi
 
 echo "prepare-firmware: patching $UEUFI (watchdog ${WATCHDOG_SECONDS}s)"
 
-# The device config the firmware build reads.
 mkdir -p "$UEUFI/Resources/Configs"
 cp devices/fuxi/uefi-config/fuxi.toml "$UEUFI/Resources/Configs/fuxi.toml"
 grep -q '0xA7000000' "$UEUFI/Resources/Configs/fuxi.toml"
@@ -50,7 +48,6 @@ from pathlib import Path
 root = Path(os.environ["ROOT"])
 uefi = root / os.environ["UEUFI"]
 watchdog_seconds = int(os.environ["WATCHDOG_SECONDS"])
-
 fuxi = uefi / "Platforms/Xiaomi/fuxiPkg"
 
 
@@ -65,35 +62,49 @@ def edit(path, fn):
         print("  patched %s" % p.relative_to(root))
 
 
-# --------------------------------------------------------------------------
-# MemoryMapLib: the loader needs one contiguous conventional run, and the
-# window is whatever the ADT says, so the run has to be big enough.
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# MemoryMapLib
+#
+# The 5th field of a row is the EFI_RESOURCE_TYPE and the 7th is the
+# EFI_MEMORY_TYPE. Flipping only the memory type leaves the region a reserved
+# resource, and DXE keeps treating it as reserved, so rows are rewritten whole
+# to the shape of "DXE Heap", which really is conventional memory.
+# ---------------------------------------------------------------------------
+CONVENTIONAL = "AddMem,   SYS_MEM, SYS_MEM_CAP, Conv,   WRITE_BACK_XN"
+ROW_RE = r'\{"%s",\s*(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+),[^}]*\}'
+
+
+def set_row(source, name, tail):
+    pattern = re.compile(ROW_RE % re.escape(name))
+    source, n = pattern.subn(
+        lambda m: '{"%s", %s, %s, %s}' % (name, m.group(1), m.group(2), tail), source)
+    if n == 0:
+        sys.exit("row not found: " + name)
+    return source
+
+
 def patch_memory_map(t):
     t = re.sub(r'[ \t]*\{"FD Reserved".*?\},\r?\n', '', t)
     t = re.sub(r'("UEFI FD",\s*)0xA7100000,\s*0x00300000', r'\g<1>0xA7000000, 0x00400000', t)
 
-    # The vendor table reserves the kernel window at 0xA8000000; publish it.
-    t, n = re.subn(r'(\{"Kernel",\s*0xA8000000,\s*0x10000000,[^}]*?)\bReserv\b', r'\1Conv', t)
-    if n == 0 and not re.search(r'\{"Kernel",\s*0xA8000000,\s*0x10000000,[^}]*?Conv\b', t):
-        sys.exit("Kernel window row not found in MemoryMapLib")
+    # The kernel window the loader allocates from.
+    t = set_row(t, "Kernel", CONVENTIONAL)
 
-    # PIL Reserved, Display Demura, RSRV2 and DBI Dump are back to back from
-    # 0x89800000 to the FD at 0xA7000000; releasing them yields one 490 MiB run.
-    for row in ("PIL Reserved", "Display Demura", "RSRV2", "DBI Dump"):
-        pattern = r'(\{"' + re.escape(row) + r'",[^}]*?)\bReserv\b'
-        t, n = re.subn(pattern, r'\1Conv', t)
-        if n == 0 and not re.search(r'\{"' + re.escape(row) + r'",[^}]*?Conv\b', t):
-            sys.exit("reservation row not found: " + row)
+    # PIL Reserved, Display Demura and RSRV2 are back to back from 0x89800000 up
+    # to the DBI Dump hole at 0xA6100000, which gives one ~473 MiB run. PIL is
+    # modem/DSP firmware that this build never starts; the other two are display
+    # and modem scratch.
+    for row in ("PIL Reserved", "Display Demura", "RSRV2"):
+        t = set_row(t, row, CONVENTIONAL)
     return t
 
 
 edit(fuxi / "Library/MemoryMapLib/MemoryMapLib.c", patch_memory_map)
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # BootShim: invalidate the destination cache before the copy, or the firmware
 # decompressor reads stale lines and fails with "Decompress Failed".
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 SHIM_NEW = "".join([
     "  ldr   x6,  =FD_SIZE\n", "\n",
     "  /* Discard stale dirty lines covering the destination before copying. */\n",
@@ -118,20 +129,20 @@ def patch_boot_shim(t):
 edit(uefi / "BootShim/BootShim.S", patch_boot_shim)
 
 
-# --------------------------------------------------------------------------
-# FuxiBootMemoryDxe: nothing publishes the payload volume otherwise, so the
-# boot manager reports "no boot entry". Enable it and drop in the override
-# that can actually find the volume in the initrd.
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# FuxiBootMemoryDxe: nothing publishes the payload volume otherwise, so the boot
+# manager reports "no boot entry". Enable it and drop in the override that can
+# find the volume in the initrd.
+# ---------------------------------------------------------------------------
 def enable_boot_memory_dxe(t):
     pat = re.compile(r'(?m)^[ \t]*#[ \t]*INF[ \t]+fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe\.inf[ \t]*$')
-    t, n = pat.subn("  INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf", t)
+    t, _ = pat.subn("  INF fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf", t)
     return t
 
 
 def enable_boot_memory_dsc(t):
     pat = re.compile(r'(?m)^[ \t]*#[ \t]*fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe\.inf[ \t]*$')
-    t, n = pat.subn("  fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf", t)
+    t, _ = pat.subn("  fuxiPkg/Drivers/FuxiBootMemoryDxe/FuxiBootMemoryDxe.inf", t)
     return t
 
 
@@ -146,18 +157,17 @@ target.parent.mkdir(parents=True, exist_ok=True)
 target.write_bytes(override.read_bytes())
 print("  installed FuxiBootMemoryDxe override")
 
-# --------------------------------------------------------------------------
-# FuxiWatchdog: resets through PSCI so an unattended test always comes back.
-# It has to be dispatched before DarwinBoot blocks in its menu, so it goes in
-# next to TimerDxe rather than at the end of the FDF.
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# FuxiWatchdog: resets through PSCI so an unattended test always comes back. It
+# has to be dispatched before DarwinBoot blocks in its menu, so it goes next to
+# TimerDxe rather than at the end of the FDF.
+# ---------------------------------------------------------------------------
 watchdog_dir = fuxi / "Drivers/FuxiWatchdog"
 watchdog_dir.mkdir(parents=True, exist_ok=True)
-watchdog_inf = root / "devices/fuxi/watchdog/FuxiWatchdog.inf"
-watchdog_c = root / "devices/fuxi/watchdog/FuxiWatchdog.c"
-(watchdog_dir / "FuxiWatchdog.inf").write_bytes(watchdog_inf.read_bytes())
+(watchdog_dir / "FuxiWatchdog.inf").write_bytes(
+    (root / "devices/fuxi/watchdog/FuxiWatchdog.inf").read_bytes())
 ticks = watchdog_seconds * 10000000
-source = watchdog_c.read_text(encoding="utf-8")
+source = (root / "devices/fuxi/watchdog/FuxiWatchdog.c").read_text(encoding="utf-8")
 source, n = re.subn(r'(?m)^#define WD_TICKS .*$', "#define WD_TICKS  %dULL" % ticks, source)
 if n == 0:
     sys.exit("WD_TICKS line not found in FuxiWatchdog.c")
@@ -186,17 +196,17 @@ def add_watchdog_to_dsc(t):
 edit(fuxi / "Include/DXE.inc", add_watchdog_to_dxe)
 edit(fuxi / "fuxi.dsc", add_watchdog_to_dsc)
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # DarwinBoot: lower the window floor so the window can be sized to the free run
 # minus the 2 MiB alignment offset.
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 window_h = root / "drivers/DarwinBoot/DarwinBootPkg/Driver/WindowSize.h"
 if window_h.is_file():
     def lower_floor(t):
         return t.replace("size >= 0x10000000ULL", "size >= 0x0e000000ULL")
     edit(window_h, lower_floor)
 else:
-    print("  note: %s not present, skipping the window floor" % window_h.relative_to(root))
+    print("  note: no drivers/DarwinBoot submodule, skipping the window floor")
 
 print("prepare-firmware: done")
 PYEOF
