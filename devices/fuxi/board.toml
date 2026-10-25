@@ -92,7 +92,11 @@ archives = [
 [kernel.prelink]
 tool = "kits/NativePrelink/emit_prelink.py"
 kernel = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
-kernelcache_sha256 = "f18b4df865405f2a287b84977d7aca745e056d656d9fc9df1662970ce2969de7"
+kernelcache_sha256 = "38e4e98d4cc1c58d5cf32ec2b4c0c025e936f6b89aaf97a6f7ba92cff9263148"
+# The prelink input is the original kernelcache with one instruction patched: AMFI's
+# "No PMGR?" abort is turned into a plain return (devices/fuxi/scripts/patch-kernelcache.py),
+# because nothing on this hardware creates the ApplePMGRNub it looks for.
+kernelcache = "out/fuxi/kernelcache-amfi-patched"
 slide = "-0x1000000"
 # AMFI is deliberately NOT initialised early. early_security_init forces its
 # ConfigurationSettings to run before IOKit matches any driver, so the ApplePMGR
