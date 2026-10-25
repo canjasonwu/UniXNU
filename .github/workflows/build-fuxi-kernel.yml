@@ -173,6 +173,28 @@ jobs:
           PYEOF
           grep -n 'FuxiWatchdog' uefi-fuxi/Platforms/Xiaomi/fuxiPkg/Include/DXE.inc uefi-fuxi/Platforms/Xiaomi/fuxiPkg/fuxi.dsc
 
+      - name: Widen the loader window floor
+        # DarwinBoot refuses any window below 256 MiB, but the loader aligns the base
+        # to 2 MiB and then adds Kernel.Base & (2 MiB - 1), so a window equal to the
+        # free run loses 0x4000 bytes and gets skipped. Lower the floor to 224 MiB and
+        # let board.toml ask for 254 MiB.
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          h = Path("drivers/DarwinBoot/DarwinBootPkg/Driver/WindowSize.h")
+          if not h.is_file():
+              sys.exit("WindowSize.h not found")
+          t = h.read_text(encoding="utf-8")
+          before = t
+          t = t.replace("size >= 0x10000000ULL", "size >= 0x0e000000ULL")
+          if t == before and "0x0e000000ULL" not in t:
+              sys.exit("window floor not found")
+          h.write_text(t, encoding="utf-8")
+          print("window floor lowered")
+          PYEOF
+          grep -n '0x0e000000' drivers/DarwinBoot/DarwinBootPkg/Driver/WindowSize.h
+
       - name: Select Xcode 16.2
         # The default Xcode on this image is 15.4; xnu-10063 is a macOS 15 source
         # and its mig needs the newer toolchain, otherwise UNDReplyServer.c fails
