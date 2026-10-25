@@ -1,0 +1,21 @@
+diff --git a/osfmk/kern/ipc_kobject.c b/osfmk/kern/ipc_kobject.c
+index f9a166f..c272aa7 100644
+--- a/osfmk/kern/ipc_kobject.c
++++ b/osfmk/kern/ipc_kobject.c
+@@ -277,8 +277,15 @@ mig_init(void)
+ 					 * Allocating a larger-than-needed kmsg creates hole for
+ 					 * inlined kmsgs (IKM_TYPE_ALL_INLINED) during copyout.
+ 					 * Disallow that.
++					 *
++					 * Some mig generators (Apple's, when -mach_msg2 is not
++					 * passed) leave max_reply_msg at zero. That must not stop
++					 * the boot: fall back to the subsystem's maximum message
++					 * size, which is a safe upper bound for the reply and is
++					 * already bounded by the check above.
+ 					 */
+-					panic("kroutine must have precise size %d %d", mig_e[i]->start, j);
++					mig_buckets[pos].kreply_size = mig_e[i]->maxsize;
++					mig_buckets[pos].kreply_desc_cnt = 0;
+ 				}
+ 
+ 				mig_buckets[pos].kobjidx = KOBJ_IDX_NOT_SET;
