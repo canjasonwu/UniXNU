@@ -200,7 +200,12 @@ def main():
               # The match string goes in both keys a matcher may consult; no reg, the
               # bring-up class does not need a register window to publish.
               node('pmgr1', [('name', b'pmgr1,bring-up\0'),
-                             ('compatible', b'pmgr1,bring-up\0')])]),
+                             ('compatible', b'pmgr1,bring-up\0'),
+                             # AppleBringUpPMGR::initRegGroups() panics with
+                             # "Missing EDT property: misc-cores-offset" / "misc-acg-offset"
+                             # when these are absent; they are plain register offsets.
+                             ('misc-cores-offset', struct.pack('<I', 0)),
+                             ('misc-acg-offset', struct.pack('<I', 0))]),
     ])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(tree)
