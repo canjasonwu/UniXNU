@@ -107,6 +107,9 @@ slide = "-0x1000000"
 # AppleMatch) drag it back in. Without the chain the kernel boots without
 # integrity enforcement, which is what a bring-up build wants anyway.
 roots = [
+# ApplePMGR is provided by the kernel itself (devices/fuxi/platform-power): AMFI
+# needs a published instance before kext classes are registered, and the kext
+# would register a duplicate class name.
   "com.apple.driver.AppleMobileFileIntegrity",
   "com.apple.security.sandbox",
   "com.apple.security.AppleImage4",
@@ -119,7 +122,6 @@ roots = [
   "com.apple.driver.AppleEffaceableStorage",
   "com.apple.driver.AppleIISController",
   "com.apple.driver.AppleM2ScalerCSCDriver",
-  "com.apple.driver.ApplePMGR",
   "com.apple.driver.IODARTFamily",
   "com.apple.filesystems.apfs",
   "com.apple.iokit.CoreAnalyticsFamily",
