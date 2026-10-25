@@ -1,60 +1,71 @@
 /*
- * PMGR integration hooks.
+ * Publish the ApplePMGRNub service AMFI needs.
  *
- * AMFI waits for a service of class ApplePMGRNub (IOService::serviceMatching +
- * waitForMatchingService + safeMetaCast to ApplePMGRNub). Nothing creates that nub
- * on this hardware, because com.apple.driver.ApplePMGR only has the
- * AppleBringUpPMGR personality matching a pmgr1,bring-up device tree node and that
- * personality never starts here.
+ * AMFI does IOService::serviceMatching("ApplePMGRNub") + waitForMatchingService +
+ * safeMetaCast to the ApplePMGRNub class, which com.apple.driver.ApplePMGR defines.
+ * Nothing on this hardware creates that nub, and AMFI runs its early security
+ * initialiser from OSKext::start, long before bsd_init.
  *
- * sheng_pmgr_run() runs from bsd_init, too early: kext classes are not registered
- * yet (confirmed on the phone). sheng_pmgr_late_probe() runs from bsd_autoconf
- * right after IOKitBSDInit(), where the classes do exist, and publishes the nub,
- * reporting each step through panic() because there is no serial port.
+ * patches/xnu/zzz-pmgr-publish-at-kext-start.patch calls this at the head of
+ * OSKext::start, where the kext dependencies (ApplePMGR) are already loaded, so the
+ * class exists. The call is idempotent and quietly retries on later starts while the
+ * class is still missing.
  */
 #include <IOKit/IOService.h>
 #include <IOKit/IOLib.h>
 #include <libkern/c++/OSMetaClass.h>
 #include <libkern/c++/OSSymbol.h>
 
+static bool fuxi_pmgr_published = false;
+
+extern "C" void
+sheng_pmgr_publish_nub(void)
+{
+	if (fuxi_pmgr_published) {
+		return;
+	}
+	const OSSymbol *symbol = OSSymbol::withCString("ApplePMGRNub");
+	if (symbol == NULL) {
+		return;
+	}
+	const OSMetaClass *meta = OSMetaClass::getMetaClassWithName(symbol);
+	symbol->release();
+	if (meta == NULL) {
+		return;                     /* not loaded yet: try again on the next start */
+	}
+	OSObject *object = meta->alloc();
+	if (object == NULL) {
+		return;
+	}
+	IOService *nub = OSDynamicCast(IOService, object);
+	if (nub == NULL) {
+		object->release();
+		return;
+	}
+	if (!nub->init()) {
+		nub->release();
+		return;
+	}
+	IOService *root = IOService::getServiceRoot();
+	if (root == NULL || !nub->attach(root)) {
+		nub->release();
+		return;
+	}
+	fuxi_pmgr_published = true;
+	nub->start(NULL);
+	IOLog("fuxi-pmgr: ApplePMGRNub published before AMFI looked for it");
+}
+
 extern "C" void
 sheng_pmgr_run(void)
 {
-	IOLog("fuxi-pmgr: bsd_init hook, classes not registered yet");
+	sheng_pmgr_publish_nub();
 }
 
 extern "C" void
 sheng_pmgr_late_probe(void)
 {
-	const OSSymbol *symbol = OSSymbol::withCString("ApplePMGRNub");
-	if (symbol == NULL) {
-		panic("fuxi-probe: cannot make the class-name symbol");
-	}
-	const OSMetaClass *meta = OSMetaClass::getMetaClassWithName(symbol);
-	symbol->release();
-	if (meta == NULL) {
-		panic("fuxi-probe: class ApplePMGRNub is not registered");
-	}
-	OSObject *object = meta->alloc();
-	if (object == NULL) {
-		panic("fuxi-probe: ApplePMGRNub alloc failed");
-	}
-	IOService *nub = OSDynamicCast(IOService, object);
-	if (nub == NULL) {
-		panic("fuxi-probe: ApplePMGRNub is not an IOService");
-	}
-	if (!nub->init()) {
-		panic("fuxi-probe: ApplePMGRNub init failed");
-	}
-	IOService *root = IOService::getServiceRoot();
-	if (root == NULL) {
-		panic("fuxi-probe: no service root");
-	}
-	if (!nub->attach(root)) {
-		panic("fuxi-probe: ApplePMGRNub attach failed");
-	}
-	nub->start(NULL);
-	IOLog("fuxi-probe: ApplePMGRNub published");
+	sheng_pmgr_publish_nub();
 }
 
 extern "C" void
