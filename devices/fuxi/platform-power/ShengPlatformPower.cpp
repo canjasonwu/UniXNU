@@ -7,6 +7,11 @@
  * publishes a PMGR service; this is the smallest version of that for fuxi: it
  * only has to satisfy the lookup, not to manage power domains.
  *
+ * The C++ class has its own name: the real ApplePMGR class is already in the
+ * prelinked kexts, and registering a second class with that name panics
+ * OSMetaClass. IOService matching reads the IOClass property, not the C++ type,
+ * so the instance still matches serviceMatching("ApplePMGR").
+ *
  * bsd_init calls sheng_pmgr_run() early (patches/xnu/sheng-platform-power.patch)
  * with XNU_SHENG_PMGR=1, so the service exists before AMFI starts.
  */
@@ -15,18 +20,18 @@
 
 #define super IOService
 
-class ApplePMGR : public IOService
+class FuxiPMGR : public IOService
 {
-	OSDeclareDefaultStructors(ApplePMGR);
+	OSDeclareDefaultStructors(FuxiPMGR);
 
 public:
 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
 };
 
-OSDefineMetaClassAndStructors(ApplePMGR, IOService)
+OSDefineMetaClassAndStructors(FuxiPMGR, IOService)
 
 bool
-ApplePMGR::start(IOService *provider)
+FuxiPMGR::start(IOService *provider)
 {
 	if (!super::start(provider)) {
 		return false;
@@ -44,7 +49,7 @@ sheng_pmgr_run(void)
 		return;
 	}
 
-	ApplePMGR *pmgr = new ApplePMGR;
+	FuxiPMGR *pmgr = new FuxiPMGR;
 	if (pmgr == NULL) {
 		return;
 	}
