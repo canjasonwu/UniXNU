@@ -2,24 +2,26 @@
  * Publish the ApplePMGR instance AMFI looks for.
  *
  * AMFI's ConfigurationSettings panics with "AMFI: No PMGR?" when no power
- * manager service is published, and on hardware without Apple's PMC nothing ever
- * publishes one. Rather than reimplementing the class (sheng subclassed ApplePMGR
- * with a generated 340 slot ABI), instantiate the ApplePMGR class the prelinked
- * kernelcache already contains, through the OSMetaClass registry, and publish it.
- *
- * bsd_init calls sheng_pmgr_run() early (patches/xnu/sheng-platform-power.patch,
- * XNU_SHENG_PMGR=1) so the service exists before AMFI starts.
+ * manager service is published, and nothing publishes one on hardware without
+ * Apple's PMC. The ApplePMGR class lives in a kext of the prelinked kernelcache,
+ * and at the bsd_init call site that kext may not be initialised yet, so load it
+ * explicitly and then publish an instance through the OSMetaClass registry.
  */
 #include <IOKit/IOService.h>
 #include <IOKit/IOLib.h>
 #include <libkern/c++/OSMetaClass.h>
 
+extern "C" kern_return_t OSKextLoadKextWithIdentifier(const char *identifier);
+
 extern "C" void
 sheng_pmgr_run(void)
 {
+	kern_return_t status = OSKextLoadKextWithIdentifier("com.apple.driver.ApplePMGR");
+	IOLog("fuxi-pmgr: kext load returned 0x%x", status);
+
 	OSObject *object = OSMetaClass::allocClassWithName("ApplePMGR");
 	if (object == NULL) {
-		IOLog("fuxi-pmgr: no ApplePMGR class in the kernel");
+		IOLog("fuxi-pmgr: no ApplePMGR class after the load");
 		return;
 	}
 
@@ -31,10 +33,9 @@ sheng_pmgr_run(void)
 	}
 	if (!pmgr->init()) {
 		pmgr->release();
-		IOLog("fuxi-pmgr: ApplePMGR init failed");
+		IOLog("fuxi-pmgr: init failed");
 		return;
 	}
-
 	IOService *root = IOService::getServiceRoot();
 	if (root == NULL || !pmgr->attach(root)) {
 		pmgr->release();
