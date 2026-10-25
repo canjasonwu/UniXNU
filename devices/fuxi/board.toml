@@ -93,31 +93,19 @@ archives = [
 tool = "kits/NativePrelink/emit_prelink.py"
 kernel = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
 kernelcache_sha256 = "f18b4df865405f2a287b84977d7aca745e056d656d9fc9df1662970ce2969de7"
-# The prelink input is the original kernelcache with one instruction patched: AMFI's
-# "No PMGR?" abort is turned into a plain return (devices/fuxi/scripts/patch-kernelcache.py),
-# because nothing on this hardware creates the ApplePMGRNub it looks for.
 slide = "-0x1000000"
-# AMFI is deliberately NOT initialised early. early_security_init forces its
-# ConfigurationSettings to run before IOKit matches any driver, so the ApplePMGR
-# instance it looks for cannot exist yet and it panics with "No PMGR?" no matter
-# what the device tree says. AMFI's own OSBundleLibraries declares a dependency on
-# com.apple.driver.ApplePMGR, so in the normal kext start order IOKit starts PMGR
-# first; the payload ADT publishes the pmgr1,bring-up node that AppleBringUpPMGR
-# matches. Note this also means AMFI starts later than before, which is the order
-# it expects on real hardware.
-# AMFI is left out on purpose: it panics with "No PMGR?" on hardware with no
-# Apple power manager, and its dependents (sandbox, AppleImage4, CoreTrust,
-# AppleMatch) drag it back in. Without the chain the kernel boots without
-# integrity enforcement, which is what a bring-up build wants anyway.
+# osfmk/kern/startup.c calls trust_cache_runtime_init() during early boot, and that
+# function panics when the AMFI interface is not registered yet. AMFI therefore has
+# to initialise first: this address is its initialiser in the kernelcache, and
+# OSKext::start calls it through
+# kits/NativePrelink/patches/xnu-10063.141.1-security-init.patch.
+# The ApplePMGRNub that the initialiser looks for is published just before it by
+# patches/xnu/zzz-pmgr-publish-at-kext-start.patch.
+early_security_init = "com.apple.driver.AppleMobileFileIntegrity=0xfffffff005ab4ae0"
 roots = [
-# AMFI panics with "No PMGR?" before any driver can publish the PMGR service it
-# wants, and its dependency (ApplePMGR) then registers a class the kernel already
-# defines, which is a duplicate. Leaving AMFI and sandbox out lets the kernel get
-# past that point; kexts that list AMFI as a library simply fail to load instead of
-# stopping the boot.
-# ApplePMGR is provided by the kernel itself (devices/fuxi/platform-power): AMFI
-# needs a published instance before kext classes are registered, and the kext
-# would register a duplicate class name.
+  "com.apple.driver.AppleMobileFileIntegrity",
+  "com.apple.driver.ApplePMGR",
+  "com.apple.security.sandbox",
   "com.apple.security.AppleImage4",
   "com.apple.kext.CoreTrust",
   "com.apple.kext.AppleMatch",
