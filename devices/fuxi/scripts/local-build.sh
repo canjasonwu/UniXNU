@@ -45,6 +45,14 @@ fi
 step() { echo; echo "=== $* ==="; }
 have() { [ -e "$1" ]; }
 
+# The composed tree under out/fuxi/tree is not refreshed for new device files, and
+# a stale copy there silently builds the wrong object, so sync what this pipeline
+# owns before the first build step.
+mkdir -p out/fuxi/tree/devices/fuxi/platform-power
+cp devices/fuxi/platform-power/ShengPlatformPower.cpp    out/fuxi/tree/devices/fuxi/platform-power/ShengPlatformPower.cpp 2>/dev/null || true
+cp scripts/build-fuxi-platform-power.py out/fuxi/tree/scripts/ 2>/dev/null || true
+cp devices/fuxi/scripts/build-arm-driver.py out/fuxi/tree/scripts/ 2>/dev/null || true
+
 step "prepare the firmware tree"
 bash devices/fuxi/scripts/prepare-firmware.sh --uefi uefi-fuxi --watchdog-seconds 90
 
