@@ -33,8 +33,16 @@ meta = macho(bytes(data))
 at = backed_offset(meta['segments'], PATCH_VA, 4, len(data))
 original, = struct.unpack_from('<I', data, at)
 print('original instruction at 0x%x: 0x%08x' % (PATCH_VA, original))
-if original != 0xb4000340:   # cbz x0, 0x5aaecfc
+# CBZ (64-bit): 10110100 imm19 Rt, branch target must be the panic block.
+if (original & 0xff000000) != 0xb4000000:
     raise SystemExit('unexpected instruction, refusing to patch')
+immediate = (original >> 5) & 0x7ffff
+if immediate & (1 << 18):
+    immediate -= 1 << 19
+target = PATCH_VA + (immediate << 2)
+if target != 0xfffffff005aaecfc:
+    raise SystemExit('branch target is 0x%x, expected the panic block' % target)
+print('confirmed: cbz to the panic block at 0x%x' % target)
 offset = (BRANCH_VA - PATCH_VA) >> 2
 patched = 0x14000000 | (offset & 0x3ffffff)
 struct.pack_into('<I', data, at, patched)
