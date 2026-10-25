@@ -1,24 +1,60 @@
 /*
- * Two hooks that live in the kernel.
+ * PMGR integration hooks.
  *
- * fuxi_panic_reset / fuxi_panic_reset_delayed: this board has no debugger and the
- * platform reboot call does not bring it back, so every panic used to leave the
- * phone dead to USB until someone held the power button. patches/xnu/zzz-panic-reset.patch
- * arms these from panic_trap_to_debugger and calls the delayed form at the end of
- * paniclog_flush(), i.e. after the panic text is on screen.
+ * AMFI waits for a service of class ApplePMGRNub (IOService::serviceMatching +
+ * waitForMatchingService + safeMetaCast to ApplePMGRNub). Nothing creates that nub
+ * on this hardware, because com.apple.driver.ApplePMGR only has the
+ * AppleBringUpPMGR personality matching a pmgr1,bring-up device tree node and that
+ * personality never starts here.
  *
- * sheng_pmgr_run(): the PMGR service AMFI wants is an ApplePMGRNub created by the
- * ApplePMGR kext, which never matches on this hardware. The abort is currently
- * patched out of the kernelcache copy (devices/fuxi/scripts/patch-kernelcache.py).
+ * sheng_pmgr_run() runs from bsd_init, too early: kext classes are not registered
+ * yet (confirmed on the phone). sheng_pmgr_late_probe() runs from bsd_autoconf
+ * right after IOKitBSDInit(), where the classes do exist, and publishes the nub,
+ * reporting each step through panic() because there is no serial port.
  */
+#include <IOKit/IOService.h>
 #include <IOKit/IOLib.h>
+#include <libkern/c++/OSMetaClass.h>
+#include <libkern/c++/OSSymbol.h>
 
-static inline uint64_t
-fuxi_timebase(void)
+extern "C" void
+sheng_pmgr_run(void)
 {
-	uint64_t value;
-	asm volatile("isb; mrs %0, cntpct_el0" : "=r"(value));
-	return value;
+	IOLog("fuxi-pmgr: bsd_init hook, classes not registered yet");
+}
+
+extern "C" void
+sheng_pmgr_late_probe(void)
+{
+	const OSSymbol *symbol = OSSymbol::withCString("ApplePMGRNub");
+	if (symbol == NULL) {
+		panic("fuxi-probe: cannot make the class-name symbol");
+	}
+	const OSMetaClass *meta = OSMetaClass::getMetaClassWithName(symbol);
+	symbol->release();
+	if (meta == NULL) {
+		panic("fuxi-probe: class ApplePMGRNub is not registered");
+	}
+	OSObject *object = meta->alloc();
+	if (object == NULL) {
+		panic("fuxi-probe: ApplePMGRNub alloc failed");
+	}
+	IOService *nub = OSDynamicCast(IOService, object);
+	if (nub == NULL) {
+		panic("fuxi-probe: ApplePMGRNub is not an IOService");
+	}
+	if (!nub->init()) {
+		panic("fuxi-probe: ApplePMGRNub init failed");
+	}
+	IOService *root = IOService::getServiceRoot();
+	if (root == NULL) {
+		panic("fuxi-probe: no service root");
+	}
+	if (!nub->attach(root)) {
+		panic("fuxi-probe: ApplePMGRNub attach failed");
+	}
+	nub->start(NULL);
+	IOLog("fuxi-probe: ApplePMGRNub published");
 }
 
 extern "C" void
@@ -32,21 +68,7 @@ fuxi_panic_reset(void)
 extern "C" void
 fuxi_panic_reset_delayed(void)
 {
-	/* 15 s at the 19.2 MHz board timebase, with a spin bound so a missing counter
-	 * cannot turn this into another hang. */
-	const uint64_t limit = 15ULL * 19200000ULL;
-	uint64_t start = fuxi_timebase();
-	for (uint64_t spins = 0; spins < 400000000ULL; spins++) {
-		if (fuxi_timebase() - start >= limit) {
-			break;
-		}
-		asm volatile("yield");
-	}
-	fuxi_panic_reset();
-}
-
-extern "C" void
-sheng_pmgr_run(void)
-{
-	IOLog("fuxi-pmgr: no in-kernel PMGR provider, AMFI check is patched out");
+	register uint64_t x0 asm("x0") = 0x84000009ULL;
+	register uint64_t x1 asm("x1") = 0;
+	asm volatile("smc #0" : "+r"(x0) : "r"(x1) : "memory");
 }
