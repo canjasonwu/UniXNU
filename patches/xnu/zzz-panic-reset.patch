@@ -1,5 +1,5 @@
 diff --git a/osfmk/arm/model_dep.c b/osfmk/arm/model_dep.c
-index 0a0e04f..530aece 100644
+index 0a0e04f..52b321d 100644
 --- a/osfmk/arm/model_dep.c
 +++ b/osfmk/arm/model_dep.c
 @@ -925,6 +925,10 @@ SavePanicInfo(
@@ -19,7 +19,7 @@ index 0a0e04f..530aece 100644
  	PE_sync_panic_buffers();
 +#if defined(XNU_FUXI_PANIC_RESET) && XNU_FUXI_PANIC_RESET
 +	/* The panic text is on screen by now. Give a reader time to photograph it,
-+	 * then reset through PSCI; the platform reboot call does not bring this
++	 * then reset through PSCI; the platform reboot path does not bring this
 +	 * board back. */
 +	if (fuxi_panic_active) {
 +		fuxi_panic_reset_delayed();
@@ -29,7 +29,7 @@ index 0a0e04f..530aece 100644
  
  /*
 diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
-index e9daeed..83c7675 100644
+index e9daeed..3fbfed7 100644
 --- a/osfmk/kern/debug.c
 +++ b/osfmk/kern/debug.c
 @@ -58,6 +58,11 @@
@@ -37,20 +37,22 @@ index e9daeed..83c7675 100644
  #include <kdp/kdp.h>
  #include <kdp/kdp_core.h>
 +#if defined(XNU_FUXI_PANIC_RESET) && XNU_FUXI_PANIC_RESET
-+	/* Set once a panic starts; paniclog_flush() uses it to reset the board,
-+	 * which otherwise stays dead to USB until someone holds the power button. */
++	/* Set while a panic is in progress; paniclog_flush() uses it to reset the
++	 * board, which otherwise stays dead to USB until someone holds power. */
 +	boolean_t fuxi_panic_active = FALSE;
 +#endif
  #include <kdp/kdp_internal.h>
  #include <kdp/kdp_callout.h>
  #include <kern/cpu_number.h>
-@@ -1176,6 +1181,9 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
- 
- 	/* do max nested panic/debugger check, this will report nesting to the console and spin forever if we exceed a limit */
- 	check_and_handle_nested_panic(panic_options_mask, panic_caller, panic_format_str, panic_args);
+@@ -1133,6 +1138,11 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
+     uint64_t panic_options_mask, void *panic_data_ptr, unsigned long panic_caller)
+ {
+ #pragma clang diagnostic pop
 +#if defined(XNU_FUXI_PANIC_RESET) && XNU_FUXI_PANIC_RESET
++	/* Arm before anything prints: the panic text goes out through
++	 * ml_panic_trap_to_debugger() below, and its flush is where the reset fires. */
 +	fuxi_panic_active = TRUE;
 +#endif
  
- 	/* Handle any necessary platform specific actions before we proceed */
- 	PEInitiatePanic();
+ #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
+ 	read_lbr();
