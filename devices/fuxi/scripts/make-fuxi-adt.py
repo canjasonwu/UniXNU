@@ -193,13 +193,16 @@ def main():
               # negative. The node exists only for class matching; NativeUfs takes its
               # physical windows from the board DT constants in GccUfs.h.
               node('ufshc', [('compatible', b'qcom,sm8550-ufshc\0')]),
+              # node() already emits the name property from the node key; adding it here as
+              # well made DarwinBoot's AdtNode() reject the tree as EFI_COMPROMISED_DATA
+              # (duplicate name property) and the menu came straight back.
               # AppleBringUpPMGR matches an AppleARMIODevice whose device tree node is
               # named pmgr1,bring-up. A child of arm-io needs reg like its siblings;
               # without it the loader returned to its menu without starting the kernel.
               # The window is inside the arm-io range; the bring-up class publishes the
               # service and does not need to touch it, and initRegGroups() additionally
               # requires the two misc offsets.
-              node('pmgr1,bring-up', [('name', b'pmgr1,bring-up\0'),
+              node('pmgr1,bring-up', [('compatible', b'pmgr1,bring-up\0'),
                                       ('compatible', b'pmgr1,bring-up\0'),
                                       ('reg', struct.pack('<4Q', 0, 0x06000000, 0, 0x1000)),
                                       ('misc-cores-offset', struct.pack('<I', 0)),
