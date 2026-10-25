@@ -63,7 +63,11 @@ if [ "$DO_KERNEL" != 0 ] || ! have out/fuxi/kernel/kernel.macho; then
   step "fetch sources"
   python3 ./unixnu fetch
 
-  step "build kernel, pass 1 (compile records)"
+  step "patch the kernelcache (AMFI PMGR check)"
+python3 devices/fuxi/scripts/patch-kernelcache.py | tail -3
+export UNIXNU_KERNELCACHE="$PWD/out/fuxi/kernelcache-amfi-patched"
+
+step "build kernel, pass 1 (compile records)"
   python3 ./unixnu build kernel > kernel-build-pass1.log 2>&1 || true
   cp out/fuxi/logs/kernel-bootstrap.log out/fuxi/logs/kernel-bootstrap-pass1.log 2>/dev/null || true
 
