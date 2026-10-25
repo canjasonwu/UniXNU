@@ -1,14 +1,33 @@
 /*
- * Diagnostic PMGR probe: there is no serial port, so every step reports through
- * panic() and the screen tells us which one failed. AMFI panics with
- * "No PMGR?" when no ApplePMGR instance is published, and the device tree node
- * alone did not make the kext publish one.
+ * Publish an ApplePMGR instance before AMFI looks for one.
+ *
+ * AMFI's ConfigurationSettings panics with "No PMGR?" when it cannot find a
+ * PMGR instance. Loading the ApplePMGR kext is not enough at bsd_init time: the
+ * kext reports success but its class is not registered yet (probe confirmed on
+ * the phone), and nothing publishes a service before AMFI starts.
+ *
+ * So the class lives in the kernel instead, the way sheng does it: ApplePMGR
+ * derives from IOPMGR, implements its seven pure virtual power hooks as no-ops,
+ * and is published from bsd_init. The ApplePMGR kext is removed from the prelink
+ * set, otherwise it would register a second class with the same name.
  */
-#include <IOKit/IOService.h>
+#include <IOKit/IOPMGR.h>
 #include <IOKit/IOLib.h>
-#include <libkern/c++/OSMetaClass.h>
 
-extern "C" kern_return_t OSKextLoadKextWithIdentifier(const char *identifier);
+class ApplePMGR : public IOPMGR
+{
+	OSDeclareDefaultStructors(ApplePMGR);
+public:
+	void disableCPUCore(unsigned int) APPLE_KEXT_OVERRIDE {}
+	void enableCPUCluster(unsigned int) APPLE_KEXT_OVERRIDE {}
+	void disableCPUCluster(unsigned int) APPLE_KEXT_OVERRIDE {}
+	void initCPUIdle(ml_processor_info_t *) APPLE_KEXT_OVERRIDE {}
+	void enterCPUIdle(UInt64 *) APPLE_KEXT_OVERRIDE {}
+	void exitCPUIdle(UInt64 *) APPLE_KEXT_OVERRIDE {}
+	void updateCPUIdle(UInt64 *) APPLE_KEXT_OVERRIDE {}
+};
+
+OSDefineMetaClassAndStructors(ApplePMGR, IOPMGR)
 
 extern "C" void
 fuxi_panic_reset(void)
@@ -21,28 +40,20 @@ fuxi_panic_reset(void)
 extern "C" void
 sheng_pmgr_run(void)
 {
-	kern_return_t status = OSKextLoadKextWithIdentifier("com.apple.driver.ApplePMGR");
-	if (status != 0) {
-		panic("fuxi-pmgr probe: kext load 0x%x", status);
-	}
-	OSObject *object = OSMetaClass::allocClassWithName("ApplePMGR");
-	if (object == NULL) {
-		panic("fuxi-pmgr probe: kext loaded, class ApplePMGR absent");
-	}
-	IOService *pmgr = OSDynamicCast(IOService, object);
+	ApplePMGR *pmgr = new ApplePMGR;
 	if (pmgr == NULL) {
-		panic("fuxi-pmgr probe: ApplePMGR is not an IOService");
+		panic("fuxi-pmgr: allocation failed");
 	}
 	if (!pmgr->init()) {
-		panic("fuxi-pmgr probe: init failed");
+		panic("fuxi-pmgr: init failed");
 	}
 	IOService *root = IOService::getServiceRoot();
 	if (root == NULL) {
-		panic("fuxi-pmgr probe: no service root");
+		panic("fuxi-pmgr: no service root");
 	}
 	if (!pmgr->attach(root)) {
-		panic("fuxi-pmgr probe: attach failed");
+		panic("fuxi-pmgr: attach failed");
 	}
 	pmgr->start(NULL);
-	IOLog("fuxi-pmgr probe: ApplePMGR published");
+	IOLog("fuxi-pmgr: ApplePMGR published from the kernel");
 }
