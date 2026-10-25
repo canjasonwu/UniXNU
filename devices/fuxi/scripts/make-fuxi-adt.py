@@ -99,9 +99,9 @@ def main():
     if args.unique_chip_id is not None and not (0 < args.unique_chip_id < 1 << 64 and 0 < args.chip_id < 1 << 32):
         parser.error('--unique-chip-id must fit 8 bytes and --chip-id 4 bytes, both nonzero')
     if args.owned_memory_size is not None and (
-            not 0x10000000 <= args.owned_memory_size <= 0x200000000
+            not 0x0e000000 <= args.owned_memory_size <= 0x200000000
             or args.owned_memory_size % 0x200000):
-        parser.error('Owned memory must be 256 MiB to 8 GiB, aligned to 2 MiB')
+        parser.error('Owned memory must be 224 MiB to 8 GiB, aligned to 2 MiB')
 
     try:
         cpu_regs = [int(value, 0) for value in args.cpu_regs.split(',')]
