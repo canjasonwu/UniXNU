@@ -803,18 +803,7 @@ EXTRA_CFLAGS="$EXTRA_CFLAGS -DXNU_BOOT_PROGRESS=$BOOT_PROGRESS"
 # the clang it runs for preprocessing, which then fails, and mig reports
 # "no SubSystem declaration"). The flag comes from MIGKSFLAGS, used by the iokit
 # DriverKit server stubs. Drop it and let the stubs generate.
-if [ "$(uname -s)" = Darwin ]; then
-  # The iPhoneOS SDK's mig does not know -mach_msg2 and forwards it to the clang it
-  # runs for preprocessing, which fails. Dropping the flag is not an option: Apple's
-  # mig then emits max_reply_msg = 0 in the kernel routing tables, and mig_init()
-  # panics with "kroutine must have precise size 4800 0" before userland starts.
-  # Generate with the macOS SDK's mig instead, which knows the flag, and keep the
-  # default MIGKSFLAGS.
-  EXTRA_MAKE_ARGS+=("MIG=$(xcrun -sdk macosx -find mig)")
-else
-  # The Linux port's mig (bootstrap_cmds) fills max_reply_msg without the flag.
-  EXTRA_MAKE_ARGS+=("MIGKSFLAGS=-DMACH_KERNEL_PRIVATE -DKERNEL_SERVER=1")
-fi
+EXTRA_MAKE_ARGS+=("MIGKSFLAGS=-DMACH_KERNEL_PRIVATE -DKERNEL_SERVER=1")
 # Record pass: the kernel link recipe writes link.filelist and only then runs the
 # linker (makedefs/MakeInc.kernel), and the archive builders need that file. The
 # link target only runs when its archive prerequisites exist, so give the absent
