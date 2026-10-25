@@ -1,19 +1,56 @@
-diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
-index e9daeed..1ab9393 100644
---- a/osfmk/kern/debug.c
-+++ b/osfmk/kern/debug.c
-@@ -1252,6 +1252,14 @@ panic_spin_forever(void)
- static void
- kdp_machine_reboot_type(unsigned int type, uint64_t debugger_flags)
+diff --git a/osfmk/arm/model_dep.c b/osfmk/arm/model_dep.c
+index 0a0e04f..530aece 100644
+--- a/osfmk/arm/model_dep.c
++++ b/osfmk/arm/model_dep.c
+@@ -925,6 +925,10 @@ SavePanicInfo(
+ void
+ paniclog_flush()
  {
 +#if defined(XNU_FUXI_PANIC_RESET) && XNU_FUXI_PANIC_RESET
-+	/* This board has no debugger and the platform reboot call below does not
-+	 * bring the phone back, so every panic leaves it dead to USB until a human
-+	 * holds the power button. Reset through PSCI instead, before the platform
-+	 * expert gets a chance to spin. */
-+	extern void fuxi_panic_reset(void);
-+	fuxi_panic_reset();
++	extern boolean_t fuxi_panic_active;
++	extern void fuxi_panic_reset_delayed(void);
 +#endif
- 	if ((type == kPEPanicRestartCPU) && (debugger_flags & DEBUGGER_OPTION_SKIP_PANICEND_CALLOUTS)) {
- 		PEHaltRestart(kPEPanicRestartCPUNoCallouts);
- 	} else {
+ 	unsigned int panicbuf_length = 0;
+ 
+ 	panicbuf_length = (unsigned int)(debug_buf_ptr - gPanicBase);
+@@ -950,6 +954,14 @@ paniclog_flush()
+ 	PESavePanicInfo((unsigned char *)gPanicBase, panicbuf_length);
+ 
+ 	PE_sync_panic_buffers();
++#if defined(XNU_FUXI_PANIC_RESET) && XNU_FUXI_PANIC_RESET
++	/* The panic text is on screen by now. Give a reader time to photograph it,
++	 * then reset through PSCI; the platform reboot call does not bring this
++	 * board back. */
++	if (fuxi_panic_active) {
++		fuxi_panic_reset_delayed();
++	}
++#endif
+ }
+ 
+ /*
+diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
+index e9daeed..83c7675 100644
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -58,6 +58,11 @@
+ #include <mach_kdp.h>
+ #include <kdp/kdp.h>
+ #include <kdp/kdp_core.h>
++#if defined(XNU_FUXI_PANIC_RESET) && XNU_FUXI_PANIC_RESET
++	/* Set once a panic starts; paniclog_flush() uses it to reset the board,
++	 * which otherwise stays dead to USB until someone holds the power button. */
++	boolean_t fuxi_panic_active = FALSE;
++#endif
+ #include <kdp/kdp_internal.h>
+ #include <kdp/kdp_callout.h>
+ #include <kern/cpu_number.h>
+@@ -1176,6 +1181,9 @@ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsign
+ 
+ 	/* do max nested panic/debugger check, this will report nesting to the console and spin forever if we exceed a limit */
+ 	check_and_handle_nested_panic(panic_options_mask, panic_caller, panic_format_str, panic_args);
++#if defined(XNU_FUXI_PANIC_RESET) && XNU_FUXI_PANIC_RESET
++	fuxi_panic_active = TRUE;
++#endif
+ 
+ 	/* Handle any necessary platform specific actions before we proceed */
+ 	PEInitiatePanic();
