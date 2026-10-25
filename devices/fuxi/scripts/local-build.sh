@@ -72,9 +72,6 @@ if [ -d out/fuxi/tree/$FR/usr/include ] && [ ! -e out/fuxi/tree/$FR/usr/local/in
   cp -n out/fuxi/tree/$FR/usr/include/Availability*.h out/fuxi/tree/$FR/usr/local/include/ 2>/dev/null || true
 fi
 
-step "patch the kernelcache (AMFI PMGR check)"
-python3 devices/fuxi/scripts/patch-kernelcache.py | tail -3
-export UNIXNU_KERNELCACHE="$PWD/out/fuxi/kernelcache-amfi-patched"
 step "build kernel, pass 1 (compile records)"
   python3 ./unixnu build kernel > kernel-build-pass1.log 2>&1 || true
   cp out/fuxi/logs/kernel-bootstrap.log out/fuxi/logs/kernel-bootstrap-pass1.log 2>/dev/null || true
