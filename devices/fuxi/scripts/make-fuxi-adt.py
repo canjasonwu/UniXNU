@@ -192,19 +192,7 @@ def main():
               # UFS (0x1d84000) lies below the arm-io window, so a child reg offset would be
               # negative. The node exists only for class matching; NativeUfs takes its
               # physical windows from the board DT constants in GccUfs.h.
-              node('ufshc', [('compatible', b'qcom,sm8550-ufshc\0')]),
-              # com.apple.driver.ApplePMGR has exactly one personality in the kernelcache:
-              # IOClass AppleBringUpPMGR, IONameMatch "pmgr1,bring-up", provider
-              # AppleARMIODevice. Nothing on this phone publishes that node, so ApplePMGR
-              # never starts, no PMGR service exists, and AMFI panics with "No PMGR?".
-              # IONameMatch matches the EDT node name itself: Apple's own personalities use
-              # node names as match values (nor-flash,cfi, nvram,nor, eeprom,i2c, sacm), so
-              # the node key has to be the match string and not just carry it. initRegGroups()
-              # requires the two register offsets or it panics on a missing EDT property.
-              node('pmgr1,bring-up', [('name', b'pmgr1,bring-up\0'),
-                             ('compatible', b'pmgr1,bring-up\0'),
-                             ('misc-cores-offset', struct.pack('<I', 0)),
-                             ('misc-acg-offset', struct.pack('<I', 0))])]),
+              node('ufshc', [('compatible', b'qcom,sm8550-ufshc\0')])]),
     ])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(tree)
