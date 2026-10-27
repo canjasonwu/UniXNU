@@ -107,3 +107,36 @@ IOKit 启动后调用，而我们在 `vfsinit()` 刚结束就调用。
   - `devices/fuxi/scripts/enable-hfs.py`：六处集成
   - `devices/fuxi/scripts/build-sweet-hfs.py`：40→38 对象编译 + 归档
   - `devices/fuxi/scripts/build-hfs-root.py`：HFS+ 根镜像
+
+
+## 2026-10-27 23:20 - Screen legend corrected, two hypotheses eliminated
+
+The three colour bands are the **kernel entry probe** (green/blue/magenta), not the panic
+screen. A real panic replaces the magenta band with text, as seen in earlier sessions. So
+"three bands, no text" means the kernel entered and then hung with no panic at all - it does
+not mean the panic text renderer failed. That eliminates the earlier S6 hypothesis.
+
+Eliminated by measurement (each image boots the entry probe and then hangs):
+- V1 1ec71b08: HFS archive linked, registration compiled out (`#if SWEET_HFS` never defined).
+- V3 ab876573: same, plus the __mod_init_func table removed from the archive (the three HFS
+  sysctl-list constructors). nm -u shows no sweet_hfs reference in bsd_init.o.
+
+So the trigger is neither the registration logic nor the module constructors: the mere
+presence of the HFS code/symbols in the kernel image is enough to hang the boot.
+
+Process problems found and repaired today:
+- local-build.sh copies the repository build script into the tree at every build, so edits
+  made only in the tree are overwritten. The first "no HFS control" was invalid for this
+  reason: both kernels contained `_hfs_vfsops` (2 symbol hits in each). Edit the repository
+  copy, never the tree copy.
+- A scripted edit of the build script corrupted it (syntax error at line 936). Restored with
+  `git checkout -- scripts/build-xnu-4k-baseline.sh`, tree copy re-synced, and a healthy
+  build verified afterwards (image 75ad7d86, kernel exports _hfs_vfsops).
+
+Next experiments, in order:
+1. V4 redone correctly: no HFS, but a ~540 KB dummy blob force-linked. Same hang -> the
+   trigger is image size/layout, not HFS content; boots -> the trigger is HFS-specific and
+   the next step is an object-level bisect starting with the IOKit glue alone.
+2. If layout: compare the Mach-O segment tables of a pre-HFS known-good kernel and the
+   HFS kernel (segment count, file vs vm sizes, alignment), and check what the loader maps.
+3. Keep the archive bisect scripted: build-sweet-hfs.py already parameterised by OBJECTS.
