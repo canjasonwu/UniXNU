@@ -8,10 +8,14 @@
 
 ## 实验 0（基线，1 分钟）
 
-- 镜像：`artifacts-ZA/boot.img`（sha256 `9b8a0568…`）
+- 镜像：`artifacts-ZB/boot.img`（sha256 `13742060…`，含定时器计数，优先用这个）
+  - 旧版可用 `artifacts-ZA/boot.img`（`9b8a0568…`，无定时器计数）
 - 内容：PID 1 只调用 `getpid()` 后 `exit(1 或 2)`；**不碰任何可能阻塞的调用**
 - 期望屏幕：
-  - `initproc failed to start … (signal 0, exit status 1)` → **本次实验成功**：说明 syscall 能执行、进程 1 身份正确
+  - `initproc failed to start … (signal 0, exit status 1 …) timer-irqs=N` → **本次实验成功**：
+    syscall 能执行、进程 1 身份正确；**同时 N 直接回答定时器问题**：
+    - `timer-irqs=0` → 定时器中断从未触发（证实假设）
+    - `timer-irqs>0` → 定时器正常，静默挂起另有原因
   - `exit status 2` → getpid ≠ 1（意外，记录下来）
   - **无文本** → 说明连 `getpid + exit` 都走不到，问题在 mockfs/exec 层或调度，不是 init 的 syscall
 - 为什么先做这个：此前带 `open()/write()/reboot()` 的版本全部静默，需要先确认最小路径可用。
