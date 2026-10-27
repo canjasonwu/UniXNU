@@ -1,0 +1,46 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 11a8212..2fc83ae 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1866,8 +1866,15 @@ proc_handle_critical_exit(proc_t p, int rv)
+ 	sync(p, (void *)NULL, (int *)NULL);
+ 
+ 	if (p->p_exit_reason == OS_REASON_NULL) {
+-		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s -- no exit reason available -- (signal %d, exit status %d %s)",
+-		    prefix_str, WTERMSIG(rv), WEXITSTATUS(rv), ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""));
++		/* fuxi bring-up: also report whether timer interrupts exist at all. */
++		char fuxi_init_msg[256];
++		extern uint64_t fuxi_boot_timer_irqs;
++		snprintf(fuxi_init_msg, sizeof(fuxi_init_msg),
++		    "%s -- no exit reason available -- (signal %d, exit status %d %s) timer-irqs=%llu",
++		    prefix_str, WTERMSIG(rv), WEXITSTATUS(rv),
++		    ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""),
++		    (unsigned long long)fuxi_boot_timer_irqs);
++		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s", fuxi_init_msg);
+ 	} else {
+ 		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s %s -- exit reason namespace %d subcode 0x%llx description: %." LAUNCHD_PANIC_REASON_STRING_MAXLEN "s",
+ 		    ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""),
+diff --git a/osfmk/arm/rtclock.c b/osfmk/arm/rtclock.c
+index 5989b48..546faf4 100644
+--- a/osfmk/arm/rtclock.c
++++ b/osfmk/arm/rtclock.c
+@@ -319,6 +319,9 @@ clock_timebase_info(mach_timebase_info_t info)
+ /*
+  * Real-time clock device interrupt.
+  */
++/* Boot CPU timer interrupt count, reported in the init death panic. */
++uint64_t fuxi_boot_timer_irqs = 0;
++
+ void
+ rtclock_intr(__unused unsigned int is_user_context)
+ {
+@@ -331,6 +334,9 @@ rtclock_intr(__unused unsigned int is_user_context)
+ 	cdp = getCpuDatap();
+ 
+ 	cdp->cpu_stat.timer_cnt++;
++	if (cdp == &BootCpuData) {
++		fuxi_boot_timer_irqs++;
++	}
+ 	SCHED_STATS_INC(timer_pop_count);
+ 
+ 	assert(!ml_get_interrupts_enabled());
