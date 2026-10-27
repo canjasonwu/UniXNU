@@ -62,6 +62,9 @@ parser.add_argument('--conflicting-boot-manifest', action='store_true', help='Ne
 parser.add_argument('--crypto-hash-method', choices=['sha2-384', 'sha1'], help='Explicit Image4 hash algorithm; target J120 DT specifies sha2-384')
 parser.add_argument('--osenvironment', choices=['ramdisk','recoveryos','main'], help='Explicit /chosen/osenvironment fixture; the kernel publishes it as hw.osenvironment')
 parser.add_argument('--amfi-platform-only', action='store_true', help='Require platform code in the offline AMFI policy fixture')
+parser.add_argument('--panic-log-address', type=lambda v: int(v, 0),
+                    help='Emit /pram reg and /chosen/embedded-panic-log-size, the embedded '
+                         'panic log region that pe_init.c maps into gPanicBase')
 parser.add_argument('--trust-cache', action='store_true', help='Provide a zeroed owned TrustCache sidecar binding')
 parser.add_argument('--virtio-mmio-fdt', type=Path, help='Describe actual VirtIO resource windows from a QEMU-generated FDT')
 parser.add_argument('--root-match-volume-uuid', type=uuid.UUID, help='Match an actual IOMedia UUID through the source root-matching mechanism')
@@ -155,12 +158,14 @@ tree = node('device-tree', [('model', b'qemu-entry-fixture\0'),
                     *([('boot-manifest-hash', bytes([0xa5]) * 48)] if args.conflicting_boot_manifest else []),
                     ('dram-base', struct.pack('<Q', 0x40000000)),
                     ('dram-size', struct.pack('<Q', args.dram_size)),
+                    *([('embedded-panic-log-size', struct.pack('<I', 16384))] if args.panic_log_address else []),
                     *([('crypto-hash-method', args.crypto_hash_method.encode() + b'\0')] if args.crypto_hash_method else []),
                     *([('amfi-only-platform-code', struct.pack('<I', 1))] if args.amfi_platform_only else []),
                     *(empty_nvram_proxy() if args.nvram_proxy else [])], [node('memory-map',
                     [*([('RAMDisk', bytes(16))] if args.ramdisk or args.data_ramdisk else []),
                      *([('TrustCache', bytes(16))] if args.trust_cache else [])]),
                      *([node('manifest-properties')] if args.armvirt else [])]),
+    *([node('pram', [('reg', struct.pack('<QQ', args.panic_log_address, 16384))])] if args.panic_log_address else []),
     node('cpus', children=[cpu, *[node('cpu%d' % index, [('state', b'waiting\0'), ('reg', struct.pack('<I', index)),
                     ('device_type', b'cpu\0'), ('compatible', b'arm,cortex-a710\0' if args.qemu_accel == 'tcg' else b'arm,armv8\0'),
                     ('timebase-frequency', struct.pack('<I', timebase))]) for index in range(1, args.smp)]]),

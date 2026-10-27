@@ -25,7 +25,11 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 
 DRAM_BASE = 0x80000000
-ARMIO_BASE = 0x17000000          # APSS peripheral block containing the GIC
+ARMIO_BASE = 0x17000000
+
+# Embedded panic log (see /chosen/embedded-panic-log): 16 KiB, placed at the end of DRAM.
+PANIC_LOG_SIZE = 16384
+PANIC_LOG_ADDRESS = lambda args: DRAM_BASE + args.dram_size - 0x10000  # last 64 KiB of DRAM          # APSS peripheral block containing the GIC
 GIC_DIST = 0x17100000
 GIC_DIST_SIZE = 0x10000
 GIC_REDIST = 0x17180000
@@ -125,6 +129,9 @@ def main():
         ('#address-cells', struct.pack('<I', 2)),
         ('#size-cells', struct.pack('<I', 2)),
     ], [
+        # iBoot describes its panic memory region here; pe_init.c maps /pram's reg
+        # and then reads /chosen/embedded-panic-log-size as the usable length.
+        node('pram', [('reg', struct.pack('<QQ', PANIC_LOG_ADDRESS(args), PANIC_LOG_SIZE))]),
         node('chosen', [('random-seed', os.urandom(64)),
                         # Without these XNU never publishes IOPlatformUUID and gethostuuid() blocks forever
                         # for callers (configd) that pass a zero timeout.
@@ -143,6 +150,12 @@ def main():
                            if args.owned_memory_size else [] ),
                         ('dram-base', struct.pack('<Q', DRAM_BASE)),
                         ('dram-size', struct.pack('<Q', args.dram_size)),
+
+                        # CONFIG_XNU_DT_PANIC_REGION is on, so the kernel maps the embedded
+                        # panic log from here rather than the Raspberry Pi address in
+                        # BCM2837.h. The region sits in the last 64 KiB of DRAM, outside the
+                        # DarwinBoot owned window that XNU manages.
+                        ('embedded-panic-log-size', struct.pack('<I', PANIC_LOG_SIZE)),
                         # Image4 hash algorithm. The target iPad's DT specifies sha2-384 in /chosen; this
                         # selects the algorithm only and asserts nothing about Apple silicon or fuses.
                         ('crypto-hash-method', b'sha2-384\0'),

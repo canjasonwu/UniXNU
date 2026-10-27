@@ -83,8 +83,47 @@ fi
 
 if [ "$DO_PAYLOAD" != 0 ] || ! have out/fuxi/payload/payload.img; then
   step "build payload volume"
-  python3 ./unixnu build payload --uefi uefi-fuxi --unique-chip-id "$CHIP_ID" > payload.log 2>&1
+  # A data ramdisk gives the kernel an md device to root from; mockfs maps
+  # that device as the executable it runs.
+  # PID 1 lives on the data ramdisk: mockfs maps that device as the executable
+  # it runs, so the ramdisk content IS the init binary (padded to a full block).
+  CLT=/opt/unixnu-linux/CommandLineTools
+  "$CLT/usr/bin/clang" -target arm64-apple-ios17.0 -nostdlib -static \
+    --ld-path="$CLT/usr/bin/ld" -Wl,-e,__start -o out/fuxi/init \
+    devices/fuxi/platform-power/init.c > init-build.log 2>&1
+  tail -1 init-build.log
+  python3 -c "d=open('out/fuxi/init','rb').read(); open('out/fuxi/data-ramdisk.img','wb').write(d + bytes(65536 - len(d)))"
+  python3 ./unixnu build payload --uefi uefi-fuxi --unique-chip-id "$CHIP_ID" \
+    --data-ramdisk out/fuxi/data-ramdisk.img > payload.log 2>&1
   tail -2 payload.log
+
+  step "loader preflight"
+  # DarwinBoot bounces back to its menu, with no kernel output at all, when the
+  # ADT ramdisk property disagrees with the ramdisk actually supplied. Catch that
+  # here instead of on the phone.
+  ADT_TMP=$(mktemp)
+  if mcopy -n -o -i out/fuxi/payload/payload.img \
+      ::/EFI/UniXNU/Payloads/kernel.macho.adt "$ADT_TMP" 2>/dev/null; then
+    if grep -aq PackedRAMDisk "$ADT_TMP"; then
+      if ! grep -q '^packed_data_ramdisk = true' devices/fuxi/board.toml; then
+        echo "preflight: ADT says PackedRAMDisk but board.toml says raw" >&2
+        exit 1
+      fi
+    elif grep -aq RAMDisk "$ADT_TMP"; then
+      if grep -q '^packed_data_ramdisk = true' devices/fuxi/board.toml; then
+        echo "preflight: ADT says RAMDisk but board.toml says packed" >&2
+        exit 1
+      fi
+    else
+      echo "preflight: ADT has no ramdisk property but a data ramdisk was passed" >&2
+      exit 1
+    fi
+    echo "preflight: ADT ramdisk property matches the build"
+  else
+    echo "preflight: could not extract the ADT from the payload image" >&2
+    exit 1
+  fi
+  rm -f "$ADT_TMP"
 fi
 
 if [ "$DO_FIRMWARE" != 0 ] || ! have uefi-fuxi/Build; then

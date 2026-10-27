@@ -228,6 +228,10 @@ kernel_args = [
   "-apfs_shared_datavolume",
   "armcpu-diagnostics=1",
   "-no_slto_panic",
+  # mockfs is the last filesystem mountroot tries, and it maps the root device
+  # as an executable. That device is the data ramdisk the loader places in the
+  # ADT, which the kernel turns into md0.
+  "rd=md0",
 ]
 # Dropped on purpose, each needs a fuxi implementation first:
 #   native-ufs-root=1  (needs the PMGR integration: without it AMFI panics on No PMGR;
@@ -257,7 +261,9 @@ chip_id = "207"                       # same SoC family as sheng; unverified her
 owned_memory_size = "0x1C000000"
 root_match_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"   # from the IPSW, not the board
 cpu_regs = "0,0x100,0x200,0x300,0x400,0x500,0x600,0x700"          # 8 cores
-packed_data_ramdisk = true
+# A packed ramdisk node makes the loader require an actually packed image; the
+# seed here is raw, so the plain RAMDisk node is the correct one.
+packed_data_ramdisk = false
 ipad_identity = true
 unique_chip_id = "required"           # platform seed, deliberately not in any repo
 

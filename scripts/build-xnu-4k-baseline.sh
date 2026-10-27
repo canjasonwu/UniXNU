@@ -33,17 +33,28 @@ fi
 # Remove them first so earlier independent patches retain their idempotent checks.
 # The same holds for the boot-time GPU addon mount (zzy), which edits the owner Data mount function inside the systemos patch.
 # Reverse newest first; the loop below re-applies them in name order.
-for LATE_PATCH in "$ROOT/patches/xnu/zzz-boot-progress.patch" "$ROOT/patches/xnu/zzy-native-gpu-addon-mount.patch"; do
-  if git -C .cache/xnu-work apply --reverse --check "$LATE_PATCH" >/dev/null 2>&1; then
-    git -C .cache/xnu-work apply --reverse "$LATE_PATCH"
-  fi
-done
-for PATCH in "$ROOT"/patches/xnu/*.patch "$ROOT"/kits/NativePrelink/patches/*.patch; do
-  if ! git -C .cache/xnu-work apply --reverse --check "$PATCH" >/dev/null 2>&1; then
-    git -C .cache/xnu-work apply --check "$PATCH"
-    git -C .cache/xnu-work apply "$PATCH"
-  fi
-done
+# Apply the patch set once per content signature. Re-running the loop against an
+# already patched tree is unreliable: the reverse check of a patch that a later
+# patch edited fails, and the build then aborts in pass 2 on a tree that is in fact
+# correct. The signature makes a warm tree a no-op and a changed set a full pass.
+PATCH_MARKER="$ROOT/.cache/xnu-work/.fuxi-patch-signature"
+PATCH_SIGNATURE=$(cat "$ROOT"/patches/xnu/*.patch "$ROOT"/kits/NativePrelink/patches/*.patch | sha256sum | cut -d" " -f1)
+if [ -f "$PATCH_MARKER" ] && [ "$(cat "$PATCH_MARKER")" = "$PATCH_SIGNATURE" ]; then
+  echo "[info] patch set unchanged, already applied"
+else
+  for LATE_PATCH in "$ROOT/patches/xnu/zzz-boot-progress.patch" "$ROOT/patches/xnu/zzy-native-gpu-addon-mount.patch"; do
+    if git -C .cache/xnu-work apply --reverse --check "$LATE_PATCH" >/dev/null 2>&1; then
+      git -C .cache/xnu-work apply --reverse "$LATE_PATCH"
+    fi
+  done
+  for PATCH in "$ROOT"/patches/xnu/*.patch "$ROOT"/kits/NativePrelink/patches/*.patch; do
+    if ! git -C .cache/xnu-work apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+      git -C .cache/xnu-work apply --check "$PATCH"
+      git -C .cache/xnu-work apply "$PATCH"
+    fi
+  done
+  echo "$PATCH_SIGNATURE" > "$PATCH_MARKER"
+fi
 export XNU_AVAILABILITY_PL=$ROOT/.cache/fakeroot/usr/local/libexec/availability.pl
 python3 scripts/prepare-xnu-source.py
 # A Linux host builds with upstream clang and GNU tools (scripts/linux): rewrite the few sources that assume
@@ -346,6 +357,9 @@ EXTRA_MAKE_ARGS+=("bsd_init.o_CFLAGS_ADD=-DXNU_SHENG_PMGR=$SHENG_PMGR -DXNU_VERI
 # A panic would otherwise spin forever with no USB function, which needs a human
 # power press before the next experiment; fuxi_panic_reset() resets through PSCI.
 EXTRA_MAKE_ARGS+=("debug.o_CFLAGS_ADD=-DXNU_FUXI_PANIC_RESET=1")
+# The bring-up PID 1 is unsigned, so the MAC exec policy refusal must not
+# abort it. Off unless the define is present (see zzz-unsigned-exec.patch).
+EXTRA_MAKE_ARGS+=("kern_exec.o_CFLAGS_ADD=-DXNU_FUXI_ALLOW_UNSIGNED_EXEC=1")
 NATIVE_MOBILE_DISPLAY=${XNU_NATIVE_MOBILE_DISPLAY:-0}
 if [ "$NATIVE_MOBILE_DISPLAY" != 0 ] && [ "$NATIVE_MOBILE_DISPLAY" != 1 ]; then
   echo 'XNU_NATIVE_MOBILE_DISPLAY must be 0 or 1' >&2

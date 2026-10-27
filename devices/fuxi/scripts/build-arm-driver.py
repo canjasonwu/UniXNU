@@ -68,7 +68,12 @@ while index < len(arguments):
 # that into a hard error.
 command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unknown-warning-option', '-Wno-unused-parameter',
                 '-Wno-c99-designator', '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
-                '-Wno-unnecessary-virtual-specifier', '-I', str(ROOT / '.cache/xnu-work/osfmk')])
+                '-Wno-unnecessary-virtual-specifier',
+                '-I', str(ROOT / '.cache/xnu-work/osfmk'),
+                # The compile records do not carry the SDK search paths; without these
+                # the kernel headers fail on mach-o/loader.h and __WORDSIZE.
+                '-I', '/opt/unixnu-linux/CommandLineTools/SDKs/MacOSX.sdk/usr/include',
+                '-I', str(ROOT / '.cache/fakeroot/usr/include')])
 if component in ('NativeVirtioBlock', 'NativeRamBlock', 'NativeUfs'):
     # The storage drivers include <IOKit/storage/IOBlockStorageDevice.h>, but this
     # xnu tree keeps iokit headers flat (iokit/IOKit/*.h) and the only copy of that

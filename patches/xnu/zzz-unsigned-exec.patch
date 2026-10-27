@@ -1,0 +1,18 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index 8bba078..66cc672 100644
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7633,2 +7633,13 @@ process_signature(proc_t p, struct image_params *imgp)
+ 	 */
++	/* The bring-up PID 1 is our own unsigned Mach-O and the MAC layer (AMFI)
++	 * refuses it with EXEC_EXIT_REASON_SECURITY_POLICY (namespace 9, code 8).
++	 * When fuxi_allow_unsigned_exec is set (it lives in the platform-power
++	 * archive) the refusal is recorded and cleared so userland can come up
++	 * while the image is unsigned. It stays 0 unless that archive sets it. */
++	extern int fuxi_allow_unsigned_exec;
++	if (imgp->ip_mac_return != 0 && fuxi_allow_unsigned_exec) {
++		printf("fuxi: exec of %s refused by MAC policy (0x%x), continuing\n",
++		    p->p_name, imgp->ip_mac_return);
++		imgp->ip_mac_return = 0;
++	}
+ 	if (imgp->ip_mac_return != 0) {
