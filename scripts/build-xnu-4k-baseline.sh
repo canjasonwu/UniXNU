@@ -254,6 +254,20 @@ if [ -d "$MOCKFS_OBJECT_DIR" ]; then
   printf '%s\n' "$MOCKFS_MODE" > "$MOCKFS_OBJECT_DIR/.source-mockfs-mode"
 fi
 EXTRA_MAKE_ARGS+=("vfs_conf.o_CFLAGS_ADD=-DMOCKFS=$MOCKFS_MODE")
+# Apple's open-source HFS is built in (bsd/sweet_hfs, staged by stage-hfs.py). The compat
+# header must come after the kernel's -D options, which is exactly what _CFLAGS_ADD appends.
+SWEET_HFS_ROOT=$ROOT/bsd/sweet_hfs
+if [ -d "$SWEET_HFS_ROOT/core" ]; then
+  SWEET_HFS_OBJS="BTree BTreeAllocate BTreeMiscOps BTreeNodeOps BTreeNodeReserve BTreeScanner BTreeTreeOps BTreeWrapper CatalogUtilities FileExtentMapping FileIDsServices MacOSStubs UnicodeWrappers VolumeAllocation hfs_attrlist hfs_btreeio hfs_catalog hfs_chash hfs_cnode hfs_cprotect hfs_endian hfs_extents hfs_fsinfo hfs_hotfiles hfs_journal hfs_link hfs_lookup hfs_notification hfs_quota hfs_readwrite hfs_resize hfs_search hfs_vfsops hfs_vfsutils hfs_vnops hfs_xattr rangelist hfs_encodinghint hfs_encodings sweet_hfs_iokit"
+  for SWEET_OBJ in $SWEET_HFS_OBJS; do
+    EXTRA_MAKE_ARGS+=("${SWEET_OBJ}.o_CFLAGS_ADD=-include $SWEET_HFS_ROOT/sweet_hfs_compat.h -I$SWEET_HFS_ROOT -I$SWEET_HFS_ROOT/core")
+  done
+  # HFSEncodings is a separate kext on Apple with its own allocation counter.
+  EXTRA_MAKE_ARGS+=("hfs_encodings.o_CFLAGS_ADD=-Dhfs_allocated=hfs_encodings_allocated")
+  EXTRA_MAKE_ARGS+=("hfs_encodinghint.o_CFLAGS_ADD=-Dhfs_allocated=hfs_encodings_allocated")
+
+fi
+
 CS_HASH_CACHE_MODE=${XNU_NATIVE_CS_HASH_CACHE:-0}
 if [ "$CS_HASH_CACHE_MODE" != 0 ] && [ "$CS_HASH_CACHE_MODE" != 1 ]; then
   echo 'XNU_NATIVE_CS_HASH_CACHE must be 0 or 1' >&2
@@ -569,6 +583,13 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ]; then
   test -f "$CRYPTO_ARCHIVE" || [ "${XNU_ALLOW_MISSING_ARCHIVES:-0}" = 1 ]
   EXTRA_CFLAGS="$EXTRA_CFLAGS -DXNU_SOURCE_CORECRYPTO14=1"
   KERNEL_EXTRA_ARCHIVES="-L$KERNEL_SDKROOT/usr/local/lib/kernel -lfirehose_kernel $CRYPTO_ARCHIVE"
+# Apple's HFS, compiled by build-sweet-hfs.py (40 objects) and force-loaded so that the
+# filesystem registers even though nothing references its symbols directly.
+SWEET_HFS_ARCHIVE=$ROOT/../../../build/sweet-hfs/libSweetHFS.a
+if [ -f "$SWEET_HFS_ARCHIVE" ]; then
+  KERNEL_EXTRA_ARCHIVES="${KERNEL_EXTRA_ARCHIVES:-} -Wl,-force_load,$SWEET_HFS_ARCHIVE"
+  KERNEL_ARCHIVE_DEPENDENCIES="${KERNEL_ARCHIVE_DEPENDENCIES:-} $SWEET_HFS_ARCHIVE"
+fi
   KERNEL_ARCHIVE_DEPENDENCIES=$CRYPTO_ARCHIVE
   if [ "$ADRENO_FIRMWARE_PROBE" = 1 ]; then
     ADRENO_PROBE_ARCHIVE=$ROOT/build/adreno-firmware-probe/libAdrenoFirmwareProbe.a
