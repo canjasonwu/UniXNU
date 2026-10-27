@@ -62,7 +62,42 @@
 | 技术栈 | 放弃 UEFI/UniXNU 线，改用他们的裸机 loader + xnu-8796 + iPhone X 17 用户态 |
 | 我们的成果 | AMFI/PMGR/未签名 exec 的成果大概率被他们的实现替代 |
 
-## 4. 结论与建议
+
+## 修正（2026-10-27 17:40，用户指出 sheng 用的是 APFS）
+
+之前写「搬 HFS」是错的。sheng 的存储链路是：
+
+```
+ShengUfs（自研 UFS host 驱动）  →  VirtioMmioBlock / RamBlock（块设备）  →  AppleAPFS（kernelcache 预链接）  →  launchd
+```
+
+核对到的事实：
+
+| 事实 | 证据 |
+|---|---|
+| 我们**已经预链接 AppleAPFS** | `board.toml:120` = `com.apple.filesystems.apfs`；kernelcache 含 `AppleAPFSContainer` |
+| kernelcache 里**没有** Apple UFS 驱动 | `com.apple.driver.AppleUFS` 不存在 → 块设备必须自己提供 |
+| 我们仓库**已有** `drivers/NativeRamBlock` 子模块 | `.gitmodules:34`，源码 `NativeRamBlock.cpp` + Sparse/Direct/SeedDisk；构建脚本已有接线（`build-xnu-4k-baseline.sh:696-784`） |
+| 但它在 board.toml 里被**显式禁用** | `board.toml:68` "NativeRamBlock disabled together with its config" |
+| 启用条件 | `CONFIG_XNU_NATIVE_RAM_BLOCK=y` 且 `CONFIG_XNU_NATIVE_AES=y`（脚本 205-213 行） |
+| Linux 上能造 APFS 镜像 | apt `apfsprogs`（含 mkfs.apfs，实验性）；HFS+ 也能造（`hfsprogs`），但内核没有 HFS |
+
+**所以正确的路线是：启用 NativeRamBlock（内存镜像当块设备）+ 已有的 APFS kext + `mkfs.apfs` 造的根镜像放进 payload。**
+全程不需要写分区，也不需要移植 HFS。HFS 移植方案撤回。
+
+### 修正后的成本
+
+| 工作 | 预计 |
+|---|---|
+| 启用 NativeRamBlock（defconfig + board.toml 构建步骤 + seed 镜像） | 1–2 天 |
+| 在 Linux 上造一个可挂载的 APFS 根镜像（mkfs.apfs 实验性，需验证 AppleAPFS 能挂） | 1–2 天（有不确定性） |
+| 让内核从该块设备挂根并跑 launchd | 2–5 天 |
+| 之后的用户态（dyld/trust cache/驱动） | 视目标而定，到 SpringBoard 仍是数月量级 |
+
+## 4. 结论与建议（已按修正更新）
+
+> 见上节：优先 NativeRamBlock + APFS，不再移植 HFS。
+
 
 - **如果你的目标是"我们自己把 XNU 推进到用户态"**（研究/掌握）：现在卡点是「没有真实文件系统」，
   最高杠杆动作是**搬 HFS**（1–3 天可编译，1–2 周到可挂载运行），而不是继续在 mockfs 上修 open。
