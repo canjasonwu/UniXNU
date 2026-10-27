@@ -43,13 +43,33 @@
 - 需要先做的离线改动（下一轮）：内核侧在 timer FIQ 路径加计数器，panic 屏打印该计数
 - 判据：计数 > 0 → 定时器正常；恒为 0 → INTID 不对，需要按 19 配置
 
-## 实验 4（NativeUFS 只读探针，可选）
+## 实验 4（UFS 只读探针，镜像已就绪）
+
+- 镜像：`artifacts-ZD/boot.img`（sha256 `9b09de71…`），内核参数已含 `fuxi-ufs-probe=1`
+- 实现：把参考驱动 `NativeUfs::inspect()` 的**只读**逻辑移植进 platform-power stub，
+  在 `sheng_pmgr_late_probe()`（bsd_autoconf 内）执行：
+  1. 先只映射并读 GCC 电源域寄存器（GDSCR bit31 = PWR_ON，CBCR bit31 = CLK_OFF）
+  2. **只有** PHY 已上电且 AXI/AHB 使能位满足时，才去读 UFS 控制器寄存器（CAP/VER/IS/HCS/HCE）
+  3. 用 `panic()` 打印全部读数（屏幕可见）
+- 期望屏幕（示例）：
+  ```
+  fuxi-ufs-probe: gdsc=8xxxxxxx axi=... ahb=... unipro=... txs=... rxs=... aux=...
+  powered=1 busclocks=1 hc_read=1
+  cap=... ver=... is=... hcs=... hce=...
+  ```
+- 判据：
+  - `hc_read=1` 且 `ver` 是合理的 UFSHCI 版本 → 控制器可访问，UFS 路线可行
+  - `powered=0` → 固件没给 UFS 上电（需要 GCC 侧配置后才能读）
+  - 屏幕无输出或直接回到菜单 → 探针在早期就挂住，需要回退（长按电源）
+- **安全**：全程只读，不写寄存器、不写分区；默认镜像（`artifacts-ZC`，`4e3394a1…`）
+  **不带**该参数，可作为对照。
+
+## 实验 5（NativeUFS 完整只读驱动，后续）
 
 - 需要先做：`devices/fuxi/NATIVEUFS-PLAN.md` 的路径 A（ADT 加 `qcom,sm8550-ufshc` 节点 +
   内核内建 bootstrap）
 - 引导参数：`native-ufs-probe=2 native-ufs-diagnostics=1`
-- 判据：日志出现 `NativeUfs: start provider=… probe=2 …` 且 GCC GDSC 上电；
-  **全程只读，不写寄存器、不写分区**
+- 判据：日志出现 `NativeUfs: start provider=… probe=2 …` 且 GCC GDSC 上电
 
 ---
 
