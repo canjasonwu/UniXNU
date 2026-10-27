@@ -28,8 +28,7 @@ OBJECTS = [
     'hfs_cnode', 'hfs_cprotect', 'hfs_endian', 'hfs_extents', 'hfs_fsinfo',
     'hfs_hotfiles', 'hfs_journal', 'hfs_link', 'hfs_lookup', 'hfs_notification',
     'hfs_quota', 'hfs_readwrite', 'hfs_resize', 'hfs_search', 'hfs_vfsops',
-    'hfs_vfsutils', 'hfs_vnops', 'hfs_xattr', 'rangelist', 'hfs_encodinghint',
-    'hfs_encodings', 'sweet_hfs_iokit',
+    'hfs_vfsutils', 'hfs_vnops', 'hfs_xattr', 'rangelist', 'sweet_hfs_iokit',
 ]
 # every source directory that holds one of the objects above
 SEARCH_DIRS = [HFS_ROOT, HFS_ROOT / 'core', HFS_ROOT / 'hfs_encodings']

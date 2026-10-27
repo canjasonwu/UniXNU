@@ -92,6 +92,9 @@ if [ "$DO_PAYLOAD" != 0 ] || ! have out/fuxi/payload/payload.img; then
     --ld-path="$CLT/usr/bin/ld" -Wl,-e,__start -o out/fuxi/init \
     devices/fuxi/platform-power/init.c > init-build.log 2>&1
   tail -1 init-build.log
+    # Isolation build: HFS is in the kernel, but the data ramdisk is the Mach-O init that
+  # already booted, so a hang here means HFS registration itself is the problem rather
+  # than the HFS mount path.
   python3 -c "d=open('out/fuxi/init','rb').read(); open('out/fuxi/data-ramdisk.img','wb').write(d + bytes(65536 - len(d)))"
   python3 ./unixnu build payload --uefi uefi-fuxi --unique-chip-id "$CHIP_ID" \
     --data-ramdisk out/fuxi/data-ramdisk.img > payload.log 2>&1

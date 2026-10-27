@@ -83,6 +83,7 @@ sweet_hfs_register(void)
 
 	hfs_init_zones();
 	hfs_sysctl_register();
+	panic("fuxi-hfs: probe stage 2 (fsadd + sysctl registered)");
 
 	uint32_t num_cpus;
 	size_t sz = sizeof(num_cpus);
@@ -97,6 +98,29 @@ sweet_hfs_register(void)
 	}
 
 	printf("SWEET HFS: hfs-627.100.6 built in and registered\n");
+}
+
+/*
+ * Filename encoding converters are an HFS (not HFS+) feature: HFS+ stores names
+ * as Unicode, so no converter is consulted for an HFS+ volume. The module is not
+ * built here; these replacements keep the catalog code well defined.
+ */
+void
+hfs_converterinit(void)
+{
+}
+
+int
+hfs_getconverter(uint32_t encoding, void **get_unicode, void **get_hfsname)
+{
+	(void)encoding;
+	if (get_unicode != NULL) {
+		*get_unicode = NULL;
+	}
+	if (get_hfsname != NULL) {
+		*get_hfsname = NULL;
+	}
+	return ENOENT;
 }
 
 /* Built in, not a loadable kext: there is no kext to retain per mount. */

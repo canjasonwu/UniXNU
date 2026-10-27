@@ -254,6 +254,8 @@ if [ -d "$MOCKFS_OBJECT_DIR" ]; then
   printf '%s\n' "$MOCKFS_MODE" > "$MOCKFS_OBJECT_DIR/.source-mockfs-mode"
 fi
 EXTRA_MAKE_ARGS+=("vfs_conf.o_CFLAGS_ADD=-DMOCKFS=$MOCKFS_MODE")
+# The HFS registration in bsd_init.c is gated on this, not on the xnu config.
+EXTRA_MAKE_ARGS+=("bsd_init.o_CFLAGS_ADD=-DFUXI_SWEET_HFS=1")
 # Apple's open-source HFS is built in (bsd/sweet_hfs, staged by stage-hfs.py). The compat
 # header must come after the kernel's -D options, which is exactly what _CFLAGS_ADD appends.
 SWEET_HFS_ROOT=$ROOT/bsd/sweet_hfs
