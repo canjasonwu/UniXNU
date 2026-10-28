@@ -193,28 +193,31 @@ fuxi_trace_mark(int index)
 	if (v->v_depth != 32 || v->v_baseaddr == 0 || v->v_rowbytes == 0) {
 		return;
 	}
-	const int slots = 16;
-	unsigned long size = v->v_height / 56;
-	unsigned long step = size + size / 2;
-	unsigned long y0 = v->v_height / 60;
-	if (y0 + size >= v->v_height) {
-		return;
-	}
+	const int per_row = 12;
+	const int slots = 36;
+	unsigned long size = v->v_height / 40;
+	unsigned long step = v->v_width / 13;
+	unsigned long row0 = v->v_height * 50 / 100;
+	unsigned long rowh = size + size / 2;
 	for (int slot = 0; slot < slots; slot++) {
-		unsigned long x0 = 4UL + (unsigned long)slot * step;
-		if (x0 + size >= v->v_width) {
-			return;
+		int row = slot / per_row;
+		int column = slot % per_row;
+		unsigned long y0 = row0 + (unsigned long)row * rowh;
+		unsigned long x0 = 8UL + (unsigned long)column * step;
+		if (y0 + size >= v->v_height || x0 + size >= v->v_width) {
+			continue;
 		}
-		uint32_t colour = (slot <= index) ? 0xffffffffu : 0xff303030u;
+		uint32_t colour = (slot <= index) ? 0xffffffffu : 0xff404040u;
 		for (unsigned long y = y0; y < y0 + size; y++) {
-			volatile uint32_t *row =
+			volatile uint32_t *p =
 			    (volatile uint32_t *)(v->v_baseaddr + y * v->v_rowbytes + x0 * 4UL);
 			for (unsigned long x = 0; x < size; x++) {
-				row[x] = colour;
+				p[x] = colour;
 			}
 		}
 	}
 }
+
 
 extern "C" void
 sheng_pmgr_late_probe(void)

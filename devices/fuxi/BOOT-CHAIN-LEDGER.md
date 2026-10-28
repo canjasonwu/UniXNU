@@ -103,3 +103,33 @@
 
 在 `vfs_mountroot()` 成功（slot 15）与 exec PID 1 之间插 16+ 号点：
 `devfs` 挂载、`/dev` 节点创建、`bsd_find_basesystem_dmg`、`exec_init`。
+
+
+## 8. 2026-10-29 凌晨：启动链已打通到 PID 1（刻度尺实测）
+
+刻度尺最终形态：36 格、三行 12 格（屏幕 50%/58%/66% 高度），已到达=白、未到达=深灰。
+调用点见 `bsd_init.c`、`hfs/sweet_hfs_iokit.c`、`kern_exec.c`、`kern_exit.c`、`hfs/core/hfs_vfsops.c`。
+
+| 镜像 | 白格 | 到达 |
+|---|---|---|
+| TA7 `2fe68852` | 19 | `set_rootvnode()`（**VFS_ROOT 成功**） |
+| TA8 `637ce442` | 23 | `load_init_program()` 之前 |
+| TA10 `73a97ed2` | 25 | `memorystatus_init_at_boot_snapshot()` 之后 |
+| TA13 `168066e7` | 29 | `init_programs` 循环内 **exec 返回** |
+| TA14 `8cddaf56` | 33 | init 退出后的 **`panic_with_options()` 之前** |
+
+### 结论（重要）
+
+1. **HFS 注册不阻塞启动**：`vfs_fsadd`、注册返回、`bsd_autoconf`、PMGR 晚探针、mountroot、
+   `VFS_ROOT`、`IOSecureBSDRoot`、`set_rootvnode`、devfs、`load_init_program` 全部通过。
+2. **PID 1 真的被 exec 并运行**（probe init 执行 `getpid` 后退出）。
+3. `proc_crash_coredump()` 与 `sync()` 均完成。
+4. 卡点 = **init 正常退出后触发的 panic 本身**：panic 被调用，但 panic 屏未绘制
+   （下方刻度未被清除，说明不是"画了没字"，而是根本没画）。
+
+### 下一步
+
+- Q7（诊断通道）：`panic_trap_to_debugger` 是否被进入（在 `osfmk/kern/debug.c` 的
+  `panic_with_options` 与 `panic_trap_to_debugger` 各加一格）。
+- **Q8（真正的里程碑）**：造一个带真实 `/sbin/launchd` 的 HFS+ 根镜像，让 HFS 挂真实根，
+  PID 1 从它启动——而不是让 probe init 立刻退出。
