@@ -1,3 +1,24 @@
+/* osfmk/console/video_console.c keeps the frame buffer geometry in this global, and its
+ * v_baseaddr is a kernel virtual address (the panic screen reads the same structure).
+ * PE_state.video holds the physical address and must not be written with the MMU on. */
+struct fuxi_vc_info {
+	unsigned int v_height;
+	unsigned int v_width;
+	unsigned int v_depth;
+	unsigned int v_rowbytes;
+	unsigned long v_baseaddr;
+	unsigned int v_type;
+	char v_name[32];
+	unsigned long long v_physaddr;
+	unsigned int v_rows;
+	unsigned int v_columns;
+	unsigned int v_rowscanbytes;
+	unsigned int v_scale;
+	unsigned int v_rotate;
+	unsigned int v_reserved[3];
+};
+extern "C" struct fuxi_vc_info vinfo;
+
 /*
  * PMGR integration: publish the ApplePMGRNub that AMFI waits for.
  *
@@ -159,6 +180,40 @@ fuxi_ufs_inspect(void)
 	    gdsc, axi, ahb, unipro, txs, rxs, aux,
 	    (unsigned)powered, (unsigned)busClocks, readHc,
 	    cap, ver, is, hcs, hce);
+}
+
+
+/* Stage counter for bring-up: one white square per stage, so a single photograph shows how
+ * far the kernel got before it hung (there is no serial console). Row is below the
+ * entry-probe bands; index selects the column. */
+extern "C" void
+fuxi_trace_mark(int index)
+{
+	struct fuxi_vc_info *v = &vinfo;
+	if (v->v_depth != 32 || v->v_baseaddr == 0 || v->v_rowbytes == 0) {
+		return;
+	}
+	const int slots = 16;
+	unsigned long size = v->v_height / 56;
+	unsigned long step = size + size / 2;
+	unsigned long y0 = v->v_height / 60;
+	if (y0 + size >= v->v_height) {
+		return;
+	}
+	for (int slot = 0; slot < slots; slot++) {
+		unsigned long x0 = 4UL + (unsigned long)slot * step;
+		if (x0 + size >= v->v_width) {
+			return;
+		}
+		uint32_t colour = (slot <= index) ? 0xffffffffu : 0xff303030u;
+		for (unsigned long y = y0; y < y0 + size; y++) {
+			volatile uint32_t *row =
+			    (volatile uint32_t *)(v->v_baseaddr + y * v->v_rowbytes + x0 * 4UL);
+			for (unsigned long x = 0; x < size; x++) {
+				row[x] = colour;
+			}
+		}
+	}
 }
 
 extern "C" void

@@ -38,9 +38,12 @@ void sweet_hfs_register(void);
 
 static vfstable_t sweet_hfs_vfs_handle;
 
+extern void fuxi_trace_mark(int index);
+
 void
 sweet_hfs_register(void)
 {
+	fuxi_trace_mark(2);
 #ifndef panic_on_assert
 	panic_on_assert = PE_i_can_has_kernel_configuration() & kPEICanHasAssertions;
 #endif
@@ -52,6 +55,7 @@ sweet_hfs_register(void)
 
 	/* The HFSEncodings kext's start(): its converters must exist before any mount. */
 	hfs_converterinit();
+	fuxi_trace_mark(3);
 
 	struct vnodeopv_desc *op_descs[] = {
 		&hfs_vnodeop_opv_desc,
@@ -80,23 +84,16 @@ sweet_hfs_register(void)
 	if (ret) {
 		panic("SWEET HFS: vfs_fsadd failed: %d", ret);
 	}
+	fuxi_trace_mark(4);
 
 	hfs_init_zones();
+	fuxi_trace_mark(5);
 	hfs_sysctl_register();
-	panic("fuxi-hfs: probe stage 2 (fsadd + sysctl registered)");
+	fuxi_trace_mark(6);
 
-	uint32_t num_cpus;
-	size_t sz = sizeof(num_cpus);
-
-	if (sysctlbyname("hw.physicalcpu", &num_cpus, &sz, NULL, 0) == 0) {
-		if ((2 * num_cpus) > MAX_CACHED_ORIGINS_DEFAULT) {
-			_hfs_max_origins = 2 * num_cpus;
-			_hfs_max_file_origins = 2 * num_cpus;
-		} else if ((2 * num_cpus) > MAX_CACHED_FILE_ORIGINS_DEFAULT) {
-			_hfs_max_file_origins = 2 * num_cpus;
-		}
-	}
-
+	/* sysctlbyname("hw.physicalcpu") used to size the HFS caches here, but it is
+	 * called from kernel context this early in the boot and never returns (the
+	 * on-screen stage ruler stops right before it). The defaults are fine. */
 	printf("SWEET HFS: hfs-627.100.6 built in and registered\n");
 }
 

@@ -70,3 +70,36 @@
 
 - 每轮结论追加到 `kernel-autopilot.md`，并在本台账更新 Q 表状态。
 - 本轮收尾运行 `pwsh tools\check-autopilot.ps1`。
+
+
+## 7. 2026-10-28 晚：屏幕刻度尺测量结果（本轮）
+
+追踪实现：`fuxi_trace_mark(index)` 画 16 个槽位（顶部，panic 屏不清扫该区域），已到达=白、未到达=深灰。
+实现要点：必须用 `vinfo.v_baseaddr`（`osfmk/console/video_console.c:119`，内核 VA）；
+用 `PE_state.video.v_baseAddr`（物理地址）会 data abort（实测镜像 2e0d883f，far=0xb802a320）。
+
+| 镜像 | sha256 前 8 位 | 白格 | 结论 |
+|---|---|---|---|
+| TC（无 HFS） | 41e87753 | 3（旧 10 格映射 0/1/7） | 追踪有效 + 基线健康，出 `initproc failed to start` 文本 |
+| TA2 | fecea3aa | 7 | 到 `hfs_sysctl_register()` 之后 |
+| TA3 | 39085859 | 7 | 同 TA2；根因 = 遗留探针 panic 仍在胶水里 |
+| TA5 | bbab84b9 | 12 | 移除全部遗留探针 → 到 `vfs_mountroot()` **入口** |
+| TA6 | f2d17da4 | 16 | `vfs_mountroot()` **成功返回**（slot 15 在成功分支内），无 panic 文本 |
+
+### 由此确定
+
+1. **HFS 注册完整通过**：`hfs_converterinit`、`vfs_fsadd`、`hfs_init_zones`、`hfs_sysctl_register` 全部完成并返回。
+2. **根文件系统成功挂载**：`vfs_mountroot()` 返回 0。
+3. 当前卡点：**mountroot 成功之后、exec PID 1 之前**，且没有 panic（真卡住，不是 panic）。
+
+### 遗留待清
+
+- `devices/fuxi/hfs/sweet_hfs_iokit.c` 里仍有 `printf("SWEET HFS: ... built in and registered")`；
+  早期内核上下文里 printf 可能阻塞，尚未验证（TA6 已通过该处，说明至少当前路径无碍）。
+- 追踪代码目前是临时插桩（`bsd_init.c` 多处 + HFS 胶水 + `ShengPlatformPower.cpp` 的 `fuxi_trace_mark`），
+  正式提交前要么保留为可选（boot arg 控制），要么移除。
+
+### 下一步（Q6）
+
+在 `vfs_mountroot()` 成功（slot 15）与 exec PID 1 之间插 16+ 号点：
+`devfs` 挂载、`/dev` 节点创建、`bsd_find_basesystem_dmg`、`exec_init`。
