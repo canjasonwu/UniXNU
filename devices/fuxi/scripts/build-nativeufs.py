@@ -58,3 +58,13 @@ if result.returncode:
             print(' ', line)
     sys.exit(1)
 print('compiled:', destination)
+
+# The kernel link expects the archive under the build tree (build-xnu-4k-baseline.sh:
+# UFS_ARCHIVE=$ROOT/build/native-ufs/libNativeUfs.a), not next to the reference sources.
+archive_dir = Path('/root/UniXNU/build/native-ufs')
+archive_dir.mkdir(parents=True, exist_ok=True)
+archive = archive_dir / 'libNativeUfs.a'
+archive.unlink(missing_ok=True)
+subprocess.run(['/opt/unixnu-linux/CommandLineTools/usr/bin/ar', 'rcs', str(archive), str(destination)],
+               check=True)
+print('archive:', archive, archive.stat().st_size, 'bytes')
