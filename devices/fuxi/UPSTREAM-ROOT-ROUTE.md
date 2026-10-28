@@ -79,3 +79,39 @@
 - 写 userdata 已获允许（数据可丢，`fastboot erase userdata` 可恢复）；**boot/bootloader/GPT 一律不碰**。
 - extent 机制的写保护（`fx_write_allowed`）值得照抄：即使 root 挂在 userdata 上，内核也只会写 root 自己的块。
 - 驱动默认 `opt-in`：`native-ufs-probe=*` / `native-fuxi-ufs-root=1` 才动作，默认不改任何 MMIO。
+
+
+## 5. 2026-10-29 03:00：HFS+ 填充问题已解决（两条路线共用）
+
+**问题**：Linux 侧无法往 HFS+ 镜像里放文件（WSL 内核没有 hfsplus 模块；老的 `hpmount` 不认新 `mkfs.hfsplus` 生成的卷）。
+
+**解法**（`devices/fuxi/scripts/populate-hfs.py`）：
+1. 宿主 `mkfs.hfsplus` 造卷；
+2. 用 `qemu-system-aarch64` + AAVMF 启动 **Ubuntu arm64 cloud image**；
+3. 三个 virtio 盘：seed ISO（cloud-init）、transfer ISO（要放进去的文件）、目标 HFS+ 裸盘；
+4. cloud-init 里：装 `linux-modules-extra-$(uname -r)`（**先 `chmod -x /etc/kernel/postinst.d/initramfs-tools`**，
+   否则 update-initramfs 在模拟环境里要跑几十分钟）→ `modprobe hfsplus` → 挂载 → `cp -a` → `sync` → 列目录 → poweroff。
+
+**实测结果**（guest 串口日志为证）：
+```
++ modprobe hfsplus
++ grep hfsplus /proc/filesystems
+	hfsplus
++ mount -t hfsplus /dev/vdd /mnt/root
+=== HFS CONTENT ===
+/mnt/root
+/mnt/root/hello.txt
+/mnt/root/sbin
+/mnt/root/sbin/launchd        (16472 bytes)
+POPULATE DONE
+```
+宿主侧 `fsck.hfsplus -n` 通过，卷头 `482b`（H+）。
+
+**产物**：`/root/fuxi-root/root.hfs`（64 MiB，含 `/sbin/launchd` + `/hello.txt`）。
+
+**已构建的主线里程碑镜像**：`artifacts-HFSROOT/boot.img` = `ae72b5ec…`（162 MB）
+- data ramdisk = 上面那个 HFS+ 卷（payload 放大到 160 MiB）
+- 内核：HFS 已注册 + 36 格刻度 + 无 HFS 相关探针
+- 预期：刻度到 15（mountroot 成功，即 **HFS 挂载成功**）→ 19（VFS_ROOT）→ 23（load_init）→
+  27/28（从 HFS exec `/sbin/launchd`）→ 29–32（init 退出路径）→ 33（panic，可能仍不渲染文字）
+- 风险：boot.img 162 MB，fastboot 之前只验证过 ≤100 MB，需要观察加载是否被拒。

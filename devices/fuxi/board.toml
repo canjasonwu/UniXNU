@@ -187,7 +187,7 @@ volume = "FUXIESP"
 # 64 MiB instead of 192: the real kernel.macho is 53.7 MiB, so the volume has to
 # hold that plus the ADT and config, and every extra MiB is a MiB the phone has to
 # take over USB in fastboot boot. 64 MiB is FAT32 (>= 70000 sectors), which EDK2 mounts.
-size_mib = 64
+size_mib = 160
 loader = "firmware"
 title = "fuxi first boot: source 4K XNU to console"
 # The payload step patches the kernel copy so a panic draws its message on the
