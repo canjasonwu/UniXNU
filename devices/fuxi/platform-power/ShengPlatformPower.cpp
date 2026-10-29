@@ -186,37 +186,8 @@ fuxi_ufs_inspect(void)
 /* Stage counter for bring-up: one white square per stage, so a single photograph shows how
  * far the kernel got before it hung (there is no serial console). Row is below the
  * entry-probe bands; index selects the column. */
-extern "C" void
-fuxi_trace_mark(int index)
-{
-	struct fuxi_vc_info *v = &vinfo;
-	if (v->v_depth != 32 || v->v_baseaddr == 0 || v->v_rowbytes == 0) {
-		return;
-	}
-	const int per_row = 12;
-	const int slots = 36;
-	unsigned long size = v->v_height / 40;
-	unsigned long step = v->v_width / 13;
-	unsigned long row0 = v->v_height * 50 / 100;
-	unsigned long rowh = size + size / 2;
-	for (int slot = 0; slot < slots; slot++) {
-		int row = slot / per_row;
-		int column = slot % per_row;
-		unsigned long y0 = row0 + (unsigned long)row * rowh;
-		unsigned long x0 = 8UL + (unsigned long)column * step;
-		if (y0 + size >= v->v_height || x0 + size >= v->v_width) {
-			continue;
-		}
-		uint32_t colour = (slot <= index) ? 0xffffffffu : 0xff404040u;
-		for (unsigned long y = y0; y < y0 + size; y++) {
-			volatile uint32_t *p =
-			    (volatile uint32_t *)(v->v_baseaddr + y * v->v_rowbytes + x0 * 4UL);
-			for (unsigned long x = 0; x < size; x++) {
-				p[x] = colour;
-			}
-		}
-	}
-}
+
+
 
 
 extern "C" void
@@ -240,4 +211,58 @@ fuxi_panic_reset_delayed(void)
 	register uint64_t x0 asm("x0") = 0x84000009ULL;
 	register uint64_t x1 asm("x1") = 0;
 	asm volatile("smc #0" : "+r"(x0) : "r"(x1) : "memory");
+}
+
+/* Stage/status display: bit 5..0 of the stage index, then bit 3..0 of the init exit status.
+ * Lit square = 1. No counting needed, which the earlier cumulative ruler required. */
+static void
+fuxi_draw_bits(unsigned stage, int have_status, unsigned status)
+{
+	struct fuxi_vc_info *v = &vinfo;
+	if (v->v_depth != 32 || v->v_baseaddr == 0 || v->v_rowbytes == 0) {
+		return;
+	}
+	unsigned long size = v->v_height / 26;
+	unsigned long step = v->v_width / 11;
+	unsigned long y0 = v->v_height * 52 / 100;
+	if (y0 + size >= v->v_height) {
+		return;
+	}
+	for (int slot = 0; slot < 10; slot++) {
+		unsigned long x0 = 8UL + (unsigned long)slot * step;
+		if (x0 + size >= v->v_width) {
+			continue;
+		}
+		unsigned lit;
+		if (slot < 6) {
+			lit = (stage >> (5 - slot)) & 1U;
+		} else if (!have_status) {
+			lit = 0;
+		} else {
+			lit = (status >> (3 - (slot - 6))) & 1U;
+		}
+		uint32_t colour = lit ? 0xffffffffu : 0xff303030u;
+		for (unsigned long y = y0; y < y0 + size; y++) {
+			volatile uint32_t *p =
+			    (volatile uint32_t *)(v->v_baseaddr + y * v->v_rowbytes + x0 * 4UL);
+			for (unsigned long x = 0; x < size; x++) {
+				p[x] = colour;
+			}
+		}
+	}
+}
+
+static unsigned fuxi_last_stage;
+
+extern "C" void
+fuxi_trace_mark(int index)
+{
+	fuxi_last_stage = (unsigned)index;
+	fuxi_draw_bits(fuxi_last_stage, 0, 0);
+}
+
+extern "C" void
+fuxi_trace_status(int status)
+{
+	fuxi_draw_bits(fuxi_last_stage, 1, (unsigned)status & 0xfU);
 }
