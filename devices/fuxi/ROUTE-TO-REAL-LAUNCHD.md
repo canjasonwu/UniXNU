@@ -349,7 +349,31 @@ dropped: /root/hfs-populate/xfer/usr/lib/rootfs-test.txt 13 bytes
 dry run: transfer ISO and seed built, not starting QEMU
 ```
 
-### 6.14 下一步
+### 6.14 拿到 IPSW 根目录后的第一步自检（2026-10-31）
+
+工具：`devices/fuxi/scripts/check-ios-root.py`
+
+```bash
+python3 devices/fuxi/scripts/check-ios-root.py selftest                       # 3 项内置自检
+python3 devices/fuxi/scripts/check-ios-root.py check --root /path/to/ios-root --print-command
+```
+
+它会检查并报告：
+
+| 项 | 内容 |
+|---|---|
+| 必需文件 | `sbin/launchd`、`usr/lib/dyld`、`System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e`（含 `.01/.02` 分片） |
+| 架构 | 两个二进制都必须是 64 位小端 Mach-O 且 **arm64/arm64e** |
+| 依赖 | 打印 launchd 的 `LC_LOAD_DYLINKER`（应为 `/usr/lib/dyld`）与其 dylib 清单（应含 libSystem） |
+| 体积 | 统计 intake 字节数；超过 payload 上限（160 MiB）会提示"必须走 userdata 路线" |
+| 骨架 | 缺哪些骨架目录（填充脚本会自动创建，仅提示） |
+| 命令 | `--print-command` 直接输出可执行的 `populate-hfs.py --launchd/--file` 命令 |
+
+退出码：0 = 全部必需项正常；1 = 有缺失或非法 Mach-O。
+
+自检（`selftest`）验证三件事：有效根被接受、缺 dyld 被拒、非法 Mach-O 被拒。
+
+### 6.15 下一步
 
 ### 6.13 下一步
 
