@@ -36,18 +36,22 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image P
 
 这张**不需要用户态能跑**：内核在 `thread_setuserstack` 之前把算出来的 sp 打印出来并停下。
 
-| 输出 | 结论 |
-|---|---|
-| `fuxi-sp-align: sp=… low=0 entry=…` | 内核给的 sp **本来就是 16 对齐** → SP 假设不成立，死因在别处（用 C2/T） |
-| `fuxi-sp-align: sp=… low=8 entry=…` | ✅ **假设成立**：内核给的 sp 只有 8 对齐 → 旧探针首个 `stp` 必然对齐故障 → SIGBUS |
-| 七段数码管出现 **55** | 同上（内核检测到 sp 未对齐并点亮 55） |
-
-### A4（内核已修：入口前把 sp 向下对齐到 16）
+> 注意：当前 A3 **已包含对齐修复**（在 `exec_copyout_strings` 里把字符串区按 16 取整、并给指针区补齐奇偶），
+> 所以期望看到 `low=0`。若仍看到 `low=8`，说明修复没覆盖到该场景（把整行发我）。
 
 | 输出 | 结论 |
 |---|---|
-| 出现 `exit status 20/21/22` 或与基线相同的 `initproc failed to start …` | ✅ 修复生效（用户态至少能跑到探针逻辑） |
-| 仍是 SIGBUS | sp 对齐不是全部原因 → 用 C2/T 继续 |
+| `fuxi-sp-align: sp=… low=0 entry=…` | ✅ 修复生效：内核交给用户态的 sp 已 16 对齐 |
+| `fuxi-sp-align: sp=… low=8 entry=…` | 修复不完整（还有别的路径影响 sp） |
+| 七段数码管出现 **55** | 检测到未对齐（与 low=8 同时出现） |
+
+### A4（内核已修：源头保证 sp 16 对齐，不动 argc 位置）
+
+| 输出 | 结论 |
+|---|---|
+| `exit status 20/21/22` | ✅ 用户态跑通（修复生效 + `__DATA`/open 正常） |
+| 与基线相同的 `initproc failed to start …` | 修复生效，但用户态仍在别处失败 → 用 C2/T |
+| 仍是 SIGBUS | sp 对齐不是全部原因 → C2/T |
 
 ### A2（对齐入口 + `__DATA` 探针）
 

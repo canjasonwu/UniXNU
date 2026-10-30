@@ -14,13 +14,13 @@
   {
     "Letter": "A3",
     "Bytes": 169619456,
-    "Sha256": "73b26d933c1dc2a778cdad2dc5ed879c67f3948d889f5ba620a8191993836c45",
+    "Sha256": "b2323902c3d9c4eb3da658ac108dd7864596365c8585dbdeb686c489489fd9b3",
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SP-PROBE\\boot.img"
   },
   {
     "Letter": "A4",
     "Bytes": 169619456,
-    "Sha256": "7ec51bba100104089bb3ebd629b313238ecb7abb329f65f1b320aa4f2873a779",
+    "Sha256": "739c7b1f6053df7338123cd0eaac114b812a5b5c5f21cb0512f3d4bbe04b058b",
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SP-FIX\\boot.img"
   },
   {

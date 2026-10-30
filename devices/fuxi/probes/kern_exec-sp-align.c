@@ -5658,6 +5658,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	int     ptr_area_size;
 	void *ptr_buffer_start, *ptr_buffer;
 	size_t string_size;
+	size_t string_copy_size;   /* bytes actually copied (reserve may be rounded) */
 
 	user_addr_t     string_area;    /* *argv[], *env[] */
 	user_addr_t     ptr_area;       /* argv[], env[], applev[] */
@@ -5721,6 +5722,10 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 
 	/* Grow the stack down for the strings we've been building up */
 	string_size = imgp->ip_strendp - imgp->ip_strings;
+	string_copy_size = string_size;
+	/* fuxi: keep the argc slot 16-byte aligned (AArch64 ABI) by reserving a rounded
+	 * strings area. Moving sp down instead would leave argc at the wrong address. */
+	string_size = (string_size + 0xF) & ~(size_t)0xF;
 	stack -= string_size;
 	string_area = stack;
 
@@ -5729,6 +5734,12 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	 * one for the NULLs terminating the argv, envv, and apple areas.
 	 */
 	ptr_area_size = (imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 3) * ptr_size;
+	/* fuxi: the argc slot sits ptr_size below the pointer area, and the AArch64 ABI wants the
+	 * resulting sp 16-byte aligned. The strings area is already rounded to 16, so pad the pointer
+	 * area by one pointer when that keeps the total a multiple of 16. */
+	if (((imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 4) * ptr_size) % 16 != 0) {
+		ptr_area_size += 16 - (((imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 4) * ptr_size) % 16);
+	}
 	stack -= ptr_area_size;
 	ptr_area = stack;
 
@@ -5760,7 +5771,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	 * Copy out the entire strings area.
 	 */
 	error = copyout(imgp->ip_strings, string_area,
-	    string_size);
+		string_copy_size);
 	if (error) {
 		goto bad;
 	}
