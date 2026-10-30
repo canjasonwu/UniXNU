@@ -9,17 +9,17 @@
  * The platform-power late probe calls the pointer when the boot argument fuxi-ufs-start=1 is present.
  */
 
-extern "C" void (*fuxi_ufs_start_hook)(void);
+extern "C" int (*fuxi_ufs_start_hook)(void);
 
 extern "C" int native_ufs_probe_start(void);
 
-static void
+static int
 fuxiNativeUfsStart(void)
 {
-	int result = native_ufs_probe_start();
 	/* 1 = started, 0 = the driver refused, negative = an earlier stage failed. The driver itself
-	 * panics with details when its own boot arguments ask for a check (native-ufs-probe=10). */
-	panic("fuxi-ufs-start: hook=%d (1 started, 0 refused, <0 stage)", result);
+	 * panics with details when its own boot arguments ask for a check (native-ufs-probe=10); the
+	 * caller reports this value together with the clock state. */
+	return native_ufs_probe_start();
 }
 
 __attribute__((constructor)) static void

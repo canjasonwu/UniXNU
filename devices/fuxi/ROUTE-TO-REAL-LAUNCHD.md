@@ -177,7 +177,37 @@ GDSCR/CBCR。所以单独做了只写"时钟分支使能位"的探针：
 - `powered=1`：把时钟使能并入镜像 V 的启动路径（`fuxi_ufs_start` 之前调用），再测驱动 bring-up；
 - `powered=0`：先解决 RPMh 上电（或确认 ABL 是否会保持 UFS 电源）。
 
-### 6.8 下一步
+### 6.8 合并镜像 X：时钟使能 + 驱动启动（一次上机回答全部阶段）
+
+镜像 W 单独测时钟时会 panic，看不到驱动阶段。为了减少上机次数，把时钟使能改成**可复用函数**
+（`fuxi_ufs_clock_enable()`，不 panic），由 `fuxi_ufs_start()` 在启动驱动前调用，最后统一报告：
+
+- `fuxi-ufs-clock=1` → 先使能缺失的时钟分支（记录 powered / 写了几条）
+- `fuxi-ufs-start=1` → 调用驱动启动钩子
+- `native-ufs-probe=10` → 驱动自己的只读检查（GPT → userdata → 清单）
+
+最终 panic 形如：
+
+```
+fuxi-ufs-start: hook=<结果> clock_powered=<0|1> clock_written=<N>
+```
+
+若驱动能走到自己的检查，还会出现它自己的 `NATIVE_UFS root check …` panic（那是更好的结果）。
+
+**镜像 X**：`artifacts-UFS-X/boot.img = 07726d8a5a671c34498b6729d9ff7f4ea919cfd3b95995dd753db7408fbedfa8`
+（`NATIVE_UFS=y` 内核，参数 `fuxi-ufs-clock=1 fuxi-ufs-start=1 native-ufs-probe=10`）
+
+判读：
+
+| 屏幕 | 含义 | 下一步 |
+|---|---|---|
+| `NATIVE_UFS root check …` | ✅ 时钟+电源+控制器都 OK，驱动读到了 GPT/清单 | 接 RAM-root |
+| `hook=0` + `clock_powered=1` | 控制器可用但驱动 `start` 拒绝 | 检查 provider 类型/驱动日志 |
+| `hook=0` + `clock_powered=0` | **电源域未开** | 必须先解决 RPMh 上电 |
+| `hook=-2` | 找不到 `IOPlatformExpertDevice` | 改 provider 搜索路径 |
+| `clock enable failed (GCC map)` | GCC 窗口映射失败 | 检查物理内存描述符 |
+
+### 6.9 下一步
 
 1. 若镜像 V 显示 `hook=1` 且驱动读到清单：把"分窗读入 RAM + sha256 校验"接到 RAM-root；
 2. 若 hook<0：把 provider 搜索换成 `IORegistryEntry::fromPath("/device-tree", gIODTPlane)` 等备选路径；
