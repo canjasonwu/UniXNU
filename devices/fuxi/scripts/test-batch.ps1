@@ -28,12 +28,13 @@
 #   Z = artifacts-MDEV-REPORT/boot.img     same as Y but panics with the registered device numbers
 #   U = artifacts-UFSREAD/boot.img         UFS clock + read OS window into RAM + register it as md
 #   R = artifacts-UFSREAD-MOUNT/boot.img   same but silently switches the root to that md (mount test)
+#   P = artifacts-UFS-CAP/boot.img         read-only UFS preflight (power, clocks, CAP bits; no driver)
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R', 'P')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -67,6 +68,7 @@ $images = @{
     Z = 'C:\Users\Jason Wu\dsh\artifacts-MDEV-REPORT\boot.img'
     U = 'C:\Users\Jason Wu\dsh\artifacts-UFSREAD\boot.img'
     R = 'C:\Users\Jason Wu\dsh\artifacts-UFSREAD-MOUNT\boot.img'
+    P = 'C:\Users\Jason Wu\dsh\artifacts-UFS-CAP\boot.img'
 }
 
 $path = $images[$Image]
