@@ -1,80 +1,102 @@
-# fuxi 交接文档（用户离开期间的自动推进结果）
+# fuxi XNU bring-up 交接包（2026-10-31 07:58）
 
-> 更新时间：2026-10-27
-> 约束不变：只用 `fastboot boot`，不写任何分区；本地构建优先。
-> 详细过程见 `kernel-autopilot.md`；路线评估见 `fuxi-routes.md`；实验清单见
-> `devices/fuxi/NEXT-DEVICE-EXPERIMENTS.md`。
+> 一页看懂：现在到哪、回来先做什么、每张镜像是什么、还需要你提供什么。
 
----
+## 1. 当前状态（一段话）
 
-## 1. 现在的状态（一句话）
+启动链已经打通到 **PID 1 被 exec**、HFS 根能挂、panic 文字通道可用。
+最近的观测是 **PID 1 死于 SIGBUS**（
+amespace 2 subcode 0xa = SIGNAL/SIGBUS(10)，**不是** FairPlay/解密）。
+本轮之后的两个候选死因都已做成可判定的镜像：
 
-内核在真机上已经**越过 AMFI、挂载根、执行 PID 1**；离线侧已经建成 **QEMU 测试床 + 内核控制台读取**，
-可以不用手机观察内核启动；下一步卡点是「用户态为什么静默挂起」与「真实根从哪来」。
+1. **用户态入口 SP 未 16 对齐**（探针首个 `stp` 直接对齐故障）→ 镜像 **A3** 直接打印内核算出的 sp 低 4 位；**A4** 携带内核侧修复
+2. **探针自身未对齐**（A–C2 这批镜像的探针入口没有对齐 sp）→ 镜像 **A2**/**K2** 带对齐入口
 
-## 2. 真机已达成的里程碑（都有截图/日志证据）
+M2（根镜像放 userdata、内核读进 RAM 再挂载）的**代码链路已全部写完**：读窗口（含 sha256 校验）→ `mdevadd` 注册 md → `setconf` 覆盖 rootdev，只等真机验证。
 
-| 里程碑 | 证据 |
-|---|---|
-| UEFI 链、内核初始化、ADT、SMP | 多轮上机 |
-| AMFI `No PMGR?` | 发布并注册 `ApplePMGRNub`（探针 status 7） |
-| AMFI 接口 + trustcache | panic 前进到挂载根 |
-| 挂载 mockfs 根 | `Process 1 exec of /sbin/launchd failed, errno 8` |
-| 执行自建 PID 1 | `initproc failed to start … (signal 0, exit status 0)` |
-| 未签名 exec 放行 | `EXEC_EXIT_REASON_SECURITY_POLICY` 不再杀 init |
+## 2. 回来先做的三件事
 
-## 3. 离线能力（本轮最重要的产出）
+```powershell
+# 0) 先确认镜像没坏（31 项检查，秒级）
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\verify-artifacts.ps1"
 
-| 能力 | 工具 |
-|---|---|
-| 在 QEMU 跑整条链（UniXNU→DarwinBoot→XNU） | `devices/fuxi/scripts/qemu-boot.sh` |
-| 读内核控制台（msgbuf，无需串口/手机） | `devices/fuxi/scripts/qemu-console.sh` + `show-msgbuf.py` |
-| 在 halt 状态读寄存器/采样 PC/符号化 | gdb + 内核符号表 |
-| 物理内存读取（QMP） | `xp` via human-monitor-command（已验证可用） |
-| panic 日志区域 | ADT `/pram` + `/chosen/embedded-panic-log-size`（已修复，QEMU 验证 `EXT_PANICLOG: Initializing list`） |
+# 1) 用户态判定：先 A3（证明 sp 对齐），再 A4（修复版能否跑起来）
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image A3
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image A4
 
-## 4. 已修复的真实缺陷（不是猜测，均有证据）
+# 2) UFS 硬件事实：P（只读，不链接驱动）
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image P
+```
 
-1. **panic 日志地址**：`PLATFORM_PANIC_LOG_PADDR` 是树莓派地址；改为从设备树读，
-   QEMU 验证 `gPanicBase` 错误消失。
-2. **补丁循环幂等性**：新增补丁导致循环重跑并在 `bsd_init.c` 误判失败 → 改为按内容签名只应用一次。
-3. **构建环境**：availability 头镜像、TrustCache/DriverKit 头恢复、SDK include 路径，均已固化进
-   `local-build.sh` / `build-arm-driver.py` / `restore-headers.py`。
-4. **UFS 只读探针**：移植参考驱动的 `inspect()`，默认关闭、boot arg 开启、全程只读
-   （镜像 `artifacts-ZD`）。
+每张镜像的完整判读表在 **`TEST-RUNBOOK.md`**；出现 panic 时把它那一行贴给我，我这边用
+`decode-panic.py` 直接给出符号与 ESR 解码。
 
-## 5. 待你决策的一件事（影响后续路线）
+## 3. 镜像索引（31 张，自动生成）
 
-| 选项 | 内容 | 代价 |
-|---|---|---|
-| **A** | 允许一次性写 `userdata` 放 HFS+ 根（复用 `hanzi123-bilp` iosroot / `bangprovn` 方案） | 违背当前「不写分区」安全线，但能最快到 SpringBoard |
-| **B** | 坚持不写分区：NativeUFS 只读挂载 或 裁剪根镜像放进 boot 镜像 | 工作量大，完全在安全线内 |
-| **C** | 直接采用 `bangprovn/ios-fuxi` 成品（已进主界面），我们做增量 | 等于换栈，放弃现有 UniXNU 积累 |
-
-**我的建议**：先做实验 0/4（无需决策，信息量最大），再按结果选 A 或 B；C 只在你想尽快看到 iOS 界面时选。
-
-## 6. 下一次上机（照做即可）
-
-| 顺序 | 镜像 | 期望 | 判据 |
+| 字母 | sha256（前 12） | 大小 | 路径 |
 |---|---|---|---|
-| 1 | `artifacts-ZB/boot.img`（`13742060…`） | `exit status 1 … timer-irqs=N` | N=0 → 定时器从未触发；N>0 → 定时器正常 |
-| 2 | `artifacts-ZD/boot.img`（`9b09de71…`） | `fuxi-ufs-probe: gdsc=… powered=… hc_read=…` | `hc_read=1` → UFS 可访问 |
-| 对照 | `artifacts-ZC/boot.img`（`4e3394a1…`） | 无探针输出 | 排除参数干扰 |
+| `A` | `3ff5efdff553` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-SIGBUS\boot.img |
+| `A2` | `084b679eec7a` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-ALIGNED\boot.img |
+| `A3` | `b8b328796e6a` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-SP-PROBE\boot.img |
+| `A4` | `9b1897b5d157` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-SP-FIX\boot.img |
+| `B` | `e305ac662245` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-SIGBUS-CONTROL\boot.img |
+| `C` | `9c166363127c` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-HFS-NAKED\boot.img |
+| `C2` | `0db35a1a5e19` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-SIGBUS-CLASS\boot.img |
+| `D` | `a16cfc755733` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-LOADINFO\boot.img |
+| `E` | `d69d4be68f33` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-NAKED-MOCKFS\boot.img |
+| `F` | `636ba13dbda8` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-VMFAULT\boot.img |
+| `G` | `98be25d6ace5` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-VMFAULT-STACK\boot.img |
+| `H` | `5dc38a0b4ea2` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-4K-HFS\boot.img |
+| `I` | `cd11c48cc811` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-4K-MOCKFS\boot.img |
+| `J` | `ad979cd32ded` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-OMNIDIAG\boot.img |
+| `K` | `56190f401999` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-HFS-EXIT1\boot.img |
+| `K2` | `8681a9cadd11` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-EXIT7-ALIGNED\boot.img |
+| `L` | `d98b8dd3b1b5` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-UFSREAD2\boot.img |
+| `M` | `2c2e693036d7` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-HFS-OPEN\boot.img |
+| `N` | `3765a9060581` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-HFS-DATA\boot.img |
+| `O` | `b96533c22f73` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-SIGBUS-STATE\boot.img |
+| `P` | `5487c2bf146b` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-UFS-CAP\boot.img |
+| `Q` | `283f52c2928e` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-PAGEIN\boot.img |
+| `R` | `56329a9d311b` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-UFSREAD-MOUNT\boot.img |
+| `S` | `416e16dd119d` | 402 MiB | C:\Users\Jason Wu\dsh\artifacts-SIZE256\boot.img |
+| `T` | `e82ed508f3aa` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-ABORT-RING\boot.img |
+| `U` | `ca3f313b2b9e` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-UFSREAD\boot.img |
+| `V` | `ed626a572459` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-NATIVEUFS-START\boot.img |
+| `W` | `1339b20b8ae8` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-UFS-CLOCK\boot.img |
+| `X` | `07726d8a5a67` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-UFS-X\boot.img |
+| `Y` | `d98141a70444` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-MDEV\boot.img |
+| `Z` | `4d8f7163c630` | 162 MiB | C:\Users\Jason Wu\dsh\artifacts-MDEV-REPORT\boot.img |
 
-每次只需：`fastboot boot <镜像>` → 拍照 → 长按电源恢复。**全程不写分区。**
+## 4. 需要你提供的东西
 
-## 7. 已知未解问题
+| 需要 | 用途 | 没有它的后果 |
+|---|---|---|
+| **设备时间**（任意一次测试） | 任何一张镜像的结果都能把"猜"变成"改代码" | 只能继续离线审计 |
+| **IPSW 的根目录**（`/sbin/launchd`、`/usr/lib/dyld`、`dyld_shared_cache_arm64e`） | 真实 launchd 的内容 | 无法进入真实内容阶段 |
+| userdata 分区大小（`fastboot getvar partition-size:userdata`） | 打包镜像的填充尺寸 | 可用 256 MiB 缺省值 |
 
-1. **用户态静默挂起**：带 `open()/write()/reboot()` 的 init 不产生 panic 文本；
-   最小 `write+exit` 版本正常。定时器计数实验将给出关键线索。
-2. **QEMU 内核 halt**：`pmap_enter_options_internal` 同步异常 → halt，原因未定位；
-   它挡住了 bsd_init 之后的离线测试（UFS 探针因此只能真机验证）。
-3. **定时器 INTID**：Xyvern 实测 fuxi 为 19，我们继承 BCM2837 通用定时器配置；
-   是否真的丢中断待实验 0 的 `timer-irqs` 回答。
+## 5. 未决问题（按重要性）
 
-## 8. 代码状态
+1. **SIGBUS 真因**：A3 的 `low` 值一出来即可判定是否 SP 对齐；不是的话用 C2（类别数字 50/52/54）+ T（`a_esr`）
+2. **UFS 电源/CAP**：P 的 `powered` 与 `cap bit24` 决定驱动路线是否可行
+3. **M2 读取链路**：U（报告）/ L（32 位 DMA 兜底）/ R（挂根）
+4. **真实 launchd 内容**：缺 IPSW 根目录
 
-全部已推送到 `canjasonwu/UniXNU` 的 `main`（最新提交见 `git log -1`），包含：
-补丁 `zzz-timer-count.patch`、`zzz-unsigned-exec.patch`、`zzz-pmgr-publish-at-kext-start.patch`，
-脚本 `qemu-boot.sh`、`qemu-console.sh`、`show-msgbuf.py`、`build-nativeufs.py`、`restore-headers.py`，
-文档 `fuxi-routes.md`、`NATIVEUFS-PLAN.md`、`BOARD-AUDIT.md`、`NEXT-DEVICE-EXPERIMENTS.md`。
+## 6. 文档与记录
+
+| 文档 | 内容 |
+|---|---|
+| `TEST-RUNBOOK.md` | 单页测试手册：每张镜像的判读与恢复 |
+| `ARTIFACTS-MANIFEST.md` | 镜像用途与推荐顺序（人读版） |
+| `SP-ALIGN-AUDIT.md` | SP 对齐改动的 7 项审计 |
+| `UFS-PREFLIGHT.md` | UFS 只读体检判读（DMA 4 GiB 约束等） |
+| `ROUTE-TO-REAL-LAUNCHD.md` | M1/M2 路线、userdata 格式、端到端手册 |
+| `kernel-autopilot.md` | 逐轮记录（含 Locator 与撤销结论） |
+| repo `devices/fuxi/START-HERE.md` | 仓库侧入口（与本地一致） |
+
+## 7. 纪律要点（避免重踩）
+
+- 全程只用 `fastboot boot`，**不写 boot/bootloader/GPT**；userdata 可用 `fastboot erase userdata` 恢复
+- HFS 源码是**外部编译 + force_load**：改 `bsd/sweet_hfs` 后 `local-build.sh` 会自动重建归档
+- 探针必须带对齐入口（`build-probe.py` 会在构建时反汇编自检）
+- `fuxi_trace_mark` 的正式声明是 `void fuxi_trace_mark(int)`，本地不要再写 `extern`
