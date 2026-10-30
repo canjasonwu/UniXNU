@@ -286,7 +286,48 @@ extern "C" int native_ufs_read_window(const char *name, void *dst,
 | `window read failed (-8)` | sha256 不符 | 写入/读取不一致，检查刷写方式 |
 | `driver not linked` | 镜像不是 `NATIVE_UFS=y` 构建 | 用 UFSREAD 镜像 |
 
-### 6.12 下一步
+### 6.12 端到端运行手册（M2 真机流程）
+
+工具与镜像都已就绪，按下面顺序执行即可。**只在 userdata 上做改动，`fastboot erase userdata` 可完全恢复。**
+
+1. **准备 HFS 根卷**（已有则跳过；约 15–20 分钟）
+   ```bash
+   cd /root/hfs-populate && python3 populate-hfs.py     # 会生成 root.hfs
+   cp root.hfs /root/fuxi-root/root.hfs
+   ```
+2. **生成 userdata 根镜像**（按分区大小填充；分区大小可用 `fastboot getvar userdata-size` 查）
+   ```bash
+   bash devices/fuxi/scripts/build-userdata-root.sh \
+       --hfs /root/fuxi-root/root.hfs \
+       --out /tmp/userdata-root.img \
+       --pad-to <userdata-size-bytes>
+   ```
+   输出会打印镜像 sha256、窗口布局与**刷写/恢复命令**。
+3. **刷入 userdata**（数据会丢，可逆）
+   ```powershell
+   fastboot flash userdata /tmp/userdata-root.img
+   ```
+4. **先跑只读报告模式**：`-Image U`（`fuxi-ufs-read=1`）
+   - 期望：`fuxi-ufs-read: ok dev=0x.. bytes=..`
+   - 失败：按 6.11 的返回码定位
+5. **再跑挂根模式**：`-Image V2M`（`fuxi-ufs-read=2`）
+   - 期望：启动继续 → HFS 从注册的 md 挂载 → 出现与基线相同的 `initproc failed to start …`
+   - 这一步成功就代表 **"根来自 userdata 镜像"** 的完整链路打通
+6. **恢复 Android 数据分区**
+   ```powershell
+   fastboot erase userdata
+   ```
+   然后正常启动 Android，让它重建数据分区。
+
+注意事项：
+
+- 步骤 4/5 的内核必须含 NativeUfs（`CONFIG_XNU_NATIVE_UFS=y`），默认镜像不含。
+- ADT **不需要**给 `ufshc` 补 `reg`：驱动用硬编码基址，且启动钩子传入的是 `IOPlatformExpertDevice`，
+  不是 `ufshc` 节点。这一点已从源码确认，避免做无谓的 ADT 改动。
+- 若步骤 4 返回 `-1`（host bring-up 失败），先看驱动日志里的 `why`：最常见是电源域没开（见 6.7 的
+  `powered` 值），其次是 DMA/SMMU 初始化。
+
+### 6.13 下一步
 
 1. 若镜像 V 显示 `hook=1` 且驱动读到清单：把"分窗读入 RAM + sha256 校验"接到 RAM-root；
 2. 若 hook<0：把 provider 搜索换成 `IORegistryEntry::fromPath("/device-tree", gIODTPlane)` 等备选路径；

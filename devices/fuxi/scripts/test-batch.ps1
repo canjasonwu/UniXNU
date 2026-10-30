@@ -27,12 +27,13 @@
 #   Y = artifacts-MDEV/boot.img            registers the RAMDisk as a second md and switches root to it
 #   Z = artifacts-MDEV-REPORT/boot.img     same as Y but panics with the registered device numbers
 #   U = artifacts-UFSREAD/boot.img         UFS clock + read OS window into RAM + register it as md
+#   R = artifacts-UFSREAD-MOUNT/boot.img   same but silently switches the root to that md (mount test)
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -65,6 +66,7 @@ $images = @{
     Y = 'C:\Users\Jason Wu\dsh\artifacts-MDEV\boot.img'
     Z = 'C:\Users\Jason Wu\dsh\artifacts-MDEV-REPORT\boot.img'
     U = 'C:\Users\Jason Wu\dsh\artifacts-UFSREAD\boot.img'
+    R = 'C:\Users\Jason Wu\dsh\artifacts-UFSREAD-MOUNT\boot.img'
 }
 
 $path = $images[$Image]

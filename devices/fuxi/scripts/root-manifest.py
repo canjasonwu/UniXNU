@@ -88,7 +88,7 @@ def build_windows(specs):
     return windows, offset
 
 
-def build_image(specs, out_path, image_bytes=None):
+def build_image(specs, out_path, image_bytes=None, pad_to=None):
     windows, total = build_windows(specs)
 
     # A window may be listed in any order, but offsets must follow file order. Sort by offset.
@@ -105,6 +105,10 @@ def build_image(specs, out_path, image_bytes=None):
         manifest[base + 56:base + 88] = window["sha256"]
     manifest[4064:4096] = hashlib.sha256(bytes(manifest[:4064])).digest()
 
+    if pad_to is not None:
+        if pad_to < total:
+            raise LayoutError(f"--pad-to {pad_to} is smaller than the assembled image {total}")
+        total = (pad_to + BLOCK - 1) // BLOCK * BLOCK
     image = bytearray(total)
     image[0:BLOCK] = manifest
     for window in windows:
@@ -166,7 +170,7 @@ def command_build(args):
         if not name or not path:
             raise LayoutError(f"--window must be NAME=PATH: {entry!r}")
         specs.append((name, path))
-    windows, total = build_image(specs, args.out, args.image_bytes)
+    windows, total = build_image(specs, args.out, args.image_bytes, args.pad_to)
     print(f"built {args.out}: {total} bytes, {len(windows)} window(s)")
     for window in windows:
         print(f"  {window['name']:<12} offset {window['offset']:>10}  size {window['size']:>10}  "
@@ -222,6 +226,40 @@ def command_selftest(_args):
     return 0
 
 
+def command_flash_plan(args):
+    """Print the exact flashing and recovery commands for an assembled userdata image.
+
+    The image is the userdata partition content: fastboot writes it from offset 0 of that partition.
+    Erasing userdata restores a clean Android data partition, so the flash is reversible without a
+    backup - which is the point of keeping the root image there instead of in boot.img.
+    """
+    path = Path(args.image).resolve()
+    if not path.is_file():
+        raise LayoutError(f"missing image: {path}")
+    raw = path.read_bytes()
+    if len(raw) % BLOCK or len(raw) < BLOCK:
+        raise LayoutError(f"image size {len(raw)} is not a positive multiple of {BLOCK}")
+    info = verify_image(path)
+    digest = hashlib.sha256(raw).hexdigest()
+    print(f"image      : {path}")
+    print(f"bytes      : {len(raw)}")
+    print(f"sha256     : {digest}")
+    print(f"manifest   : ok, {len(info['windows'])} window(s), image bytes {info['image_bytes']}")
+    print()
+    print("flash (data loss on userdata is expected and reversible):")
+    print(f'  fastboot flash userdata "{path}"')
+    print()
+    print("verify the write landed (first 4 KiB of the partition):")
+    print(f'  fastboot getvar userdata-size        # optional: partition size')
+    print()
+    print("restore a clean data partition:")
+    print("  fastboot erase userdata")
+    print("  # plus a normal Android boot to let it reformat as ext4/f2fs")
+    print()
+    print("then boot the kernel that reads it:")
+    print("  pwsh -NoProfile -File \"C:/Users/Jason Wu/dsh/test-batch.ps1\" -Image U")
+
+
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -231,6 +269,9 @@ def main(argv):
     build.add_argument("--window", action="append", metavar="NAME=PATH")
     build.add_argument("--image-bytes", type=int, default=None,
                        help="override the recorded image byte count (defaults to the assembled size)")
+    build.add_argument("--pad-to", type=int, default=None,
+                       help="zero pad the file to at least this many bytes (a multiple of 4096); "
+                            "use the userdata partition size so the flash matches the partition")
     build.set_defaults(func=command_build)
 
     verify = sub.add_parser("verify", help="validate an image against the on-device parser rules")
@@ -239,6 +280,10 @@ def main(argv):
 
     selftest = sub.add_parser("selftest", help="build, verify and reject corrupted images")
     selftest.set_defaults(func=command_selftest)
+
+    flash = sub.add_parser("flash-plan", help="print the flashing and recovery commands for an image")
+    flash.add_argument("--image", required=True)
+    flash.set_defaults(func=command_flash_plan)
 
     args = parser.parse_args(argv)
     try:
