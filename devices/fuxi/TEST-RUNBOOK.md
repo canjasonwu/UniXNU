@@ -32,6 +32,23 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image P
 
 ## 3. 每张镜像的判读
 
+### A3（内核侧报告初始用户 SP 的低 4 位）
+
+这张**不需要用户态能跑**：内核在 `thread_setuserstack` 之前把算出来的 sp 打印出来并停下。
+
+| 输出 | 结论 |
+|---|---|
+| `fuxi-sp-align: sp=… low=0 entry=…` | 内核给的 sp **本来就是 16 对齐** → SP 假设不成立，死因在别处（用 C2/T） |
+| `fuxi-sp-align: sp=… low=8 entry=…` | ✅ **假设成立**：内核给的 sp 只有 8 对齐 → 旧探针首个 `stp` 必然对齐故障 → SIGBUS |
+| 七段数码管出现 **55** | 同上（内核检测到 sp 未对齐并点亮 55） |
+
+### A4（内核已修：入口前把 sp 向下对齐到 16）
+
+| 输出 | 结论 |
+|---|---|
+| 出现 `exit status 20/21/22` 或与基线相同的 `initproc failed to start …` | ✅ 修复生效（用户态至少能跑到探针逻辑） |
+| 仍是 SIGBUS | sp 对齐不是全部原因 → 用 C2/T 继续 |
+
 ### A2（对齐入口 + `__DATA` 探针）
 
 屏幕/结果 → 结论：

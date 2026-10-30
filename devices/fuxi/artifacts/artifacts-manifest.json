@@ -12,6 +12,18 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-ALIGNED\\boot.img"
   },
   {
+    "Letter": "A3",
+    "Bytes": 169619456,
+    "Sha256": "73b26d933c1dc2a778cdad2dc5ed879c67f3948d889f5ba620a8191993836c45",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SP-PROBE\\boot.img"
+  },
+  {
+    "Letter": "A4",
+    "Bytes": 169619456,
+    "Sha256": "7ec51bba100104089bb3ebd629b313238ecb7abb329f65f1b320aa4f2873a779",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SP-FIX\\boot.img"
+  },
+  {
     "Letter": "B",
     "Bytes": 169619456,
     "Sha256": "e305ac6622458b7bdd3e2f0c9a372fb6d4ac597e0786ef186932a98188489eb5",
