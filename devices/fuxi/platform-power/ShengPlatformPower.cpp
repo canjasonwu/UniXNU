@@ -213,56 +213,110 @@ fuxi_panic_reset_delayed(void)
 	asm volatile("smc #0" : "+r"(x0) : "r"(x1) : "memory");
 }
 
-/* Stage/status display: bit 5..0 of the stage index, then bit 3..0 of the init exit status.
- * Lit square = 1. No counting needed, which the earlier cumulative ruler required. */
+/* Bring-up display: three seven-segment numbers, drawn large and re-drawn completely on every
+ * update so no value is ever lost:
+ *   white  = current stage index (2 digits, 0..63)
+ *   cyan   = WTERMSIG of init (2 digits)
+ *   yellow = WEXITSTATUS of init (1 digit)
+ * Squares were abandoned: counting them was ambiguous and later marks cleared the area. */
+static unsigned fuxi_stage;
+static unsigned fuxi_signal;
+static unsigned fuxi_status;
+
 static void
-fuxi_draw_bits(unsigned stage, int have_status, unsigned status)
+fuxi_seg(unsigned long x, unsigned long y, unsigned long w, unsigned long h, int seg, uint32_t colour)
+{
+	struct fuxi_vc_info *v = &vinfo;
+	/* segment order: 0 top, 1 top-right, 2 bottom-right, 3 bottom, 4 bottom-left, 5 top-left, 6 middle */
+	unsigned long x0 = x, y0 = y, xs = w, ys = h;
+	switch (seg) {
+	case 0: y0 = y; xs = w; ys = h / 8; break;
+	case 1: x0 = x + w - h / 8; y0 = y; xs = h / 8; ys = h / 2; break;
+	case 2: x0 = x + w - h / 8; y0 = y + h / 2; xs = h / 8; ys = h / 2; break;
+	case 3: y0 = y + h - h / 8; xs = w; ys = h / 8; break;
+	case 4: x0 = x; y0 = y + h / 2; xs = h / 8; ys = h / 2; break;
+	case 5: x0 = x; y0 = y; xs = h / 8; ys = h / 2; break;
+	default: y0 = y + h / 2 - h / 16; xs = w; ys = h / 8; break;
+	}
+	unsigned long row = v->v_baseaddr + y0 * v->v_rowbytes + x0 * 4UL;
+	for (unsigned long dy = 0; dy < ys; dy++) {
+		volatile uint32_t *p = (volatile uint32_t *)(row + dy * v->v_rowbytes);
+		for (unsigned long dx = 0; dx < xs; dx++) {
+			p[dx] = colour;
+		}
+	}
+}
+
+static const unsigned char fuxi_digit_segments[10] = {
+	0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f
+};
+
+static void
+fuxi_digit(unsigned long x, unsigned long y, unsigned long w, unsigned long h, unsigned d, uint32_t colour)
+{
+	unsigned char mask = fuxi_digit_segments[d % 10];
+	for (int seg = 0; seg < 7; seg++) {
+		if (mask & (1 << seg)) {
+			fuxi_seg(x, y, w, h, seg, colour);
+		}
+	}
+}
+
+static void
+fuxi_clear(unsigned long x, unsigned long y, unsigned long w, unsigned long h)
+{
+	struct fuxi_vc_info *v = &vinfo;
+	for (unsigned long dy = 0; dy < h; dy++) {
+		volatile uint32_t *p = (volatile uint32_t *)(v->v_baseaddr + (y + dy) * v->v_rowbytes + x * 4UL);
+		for (unsigned long dx = 0; dx < w; dx++) {
+			p[dx] = 0xff000000u;
+		}
+	}
+}
+
+static void
+fuxi_draw(void)
 {
 	struct fuxi_vc_info *v = &vinfo;
 	if (v->v_depth != 32 || v->v_baseaddr == 0 || v->v_rowbytes == 0) {
 		return;
 	}
-	unsigned long size = v->v_height / 26;
-	unsigned long step = v->v_width / 11;
-	unsigned long y0 = v->v_height * 52 / 100;
-	if (y0 + size >= v->v_height) {
+	unsigned long h = v->v_height / 12;
+	unsigned long w = h / 2;
+	unsigned long y = v->v_height * 68 / 100;
+	unsigned long x = v->v_width / 12;
+	if (y + h >= v->v_height || x + 8 * w >= v->v_width) {
 		return;
 	}
-	for (int slot = 0; slot < 10; slot++) {
-		unsigned long x0 = 8UL + (unsigned long)slot * step;
-		if (x0 + size >= v->v_width) {
-			continue;
-		}
-		unsigned lit;
-		if (slot < 6) {
-			lit = (stage >> (5 - slot)) & 1U;
-		} else if (!have_status) {
-			lit = 0;
-		} else {
-			lit = (status >> (3 - (slot - 6))) & 1U;
-		}
-		uint32_t colour = lit ? 0xffffffffu : 0xff303030u;
-		for (unsigned long y = y0; y < y0 + size; y++) {
-			volatile uint32_t *p =
-			    (volatile uint32_t *)(v->v_baseaddr + y * v->v_rowbytes + x0 * 4UL);
-			for (unsigned long x = 0; x < size; x++) {
-				p[x] = colour;
-			}
-		}
-	}
+	fuxi_clear(x, y, 9 * w + w, h);
+	fuxi_digit(x, y, w, h, (fuxi_stage / 10) % 10, 0xffffffffu);
+	fuxi_digit(x + w + w / 2, y, w, h, fuxi_stage % 10, 0xffffffffu);
+	fuxi_digit(x + 4 * w, y, w, h, (fuxi_signal / 10) % 10, 0xff00ffffu);
+	fuxi_digit(x + 5 * w + w / 2, y, w, h, fuxi_signal % 10, 0xff00ffffu);
+	fuxi_digit(x + 8 * w, y, w, h, fuxi_status % 10, 0xffffff00u);
 }
-
-static unsigned fuxi_last_stage;
 
 extern "C" void
 fuxi_trace_mark(int index)
 {
-	fuxi_last_stage = (unsigned)index;
-	fuxi_draw_bits(fuxi_last_stage, 0, 0);
+	fuxi_stage = (unsigned)index;
+	fuxi_draw();
 }
 
 extern "C" void
-fuxi_trace_status(int status)
+fuxi_trace_wait(int wait_status)
 {
-	fuxi_draw_bits(fuxi_last_stage, 1, (unsigned)status & 0xfU);
+	fuxi_status = ((unsigned)wait_status >> 8) & 0xfu;
+	fuxi_signal = (unsigned)wait_status & 0x7fu;
+	fuxi_draw();
+}
+
+extern "C" void
+fuxi_trace_abort(unsigned esr)
+{
+	/* Report the exception class and fault status code of a user abort. */
+	fuxi_stage = (esr >> 26) & 0x3fu;
+	fuxi_signal = esr & 0x3fu;
+	fuxi_status = 9;
+	fuxi_draw();
 }
