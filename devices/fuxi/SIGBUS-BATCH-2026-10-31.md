@@ -17,6 +17,20 @@
 | E | `artifacts-NAKED-MOCKFS/boot.img` | `d69d4be68f33e3fd40be7b80af2d96c034ad5c5e1ff5892f6db391af86e9e6bf` | mockfs，同探针 | D 的对照（只有根 FS 不同） |
 | F | `artifacts-VMFAULT/boot.img` | `636ba13dbda8e58991153ef23cb5a6d4a15ac8e3a4c57bf832770133f0c64b75` | HFS，无栈探针 | **vm_fault 判决**：失败时打印返回值/地址/权限/PC/SP |
 | G | `artifacts-VMFAULT-STACK/boot.img` | `98be25d6ace5d776f92b38b7dcbe8bd91f19298c2e53bc2a6734f9460c8c9249` | HFS，会写栈的探针（getpid→open→write→空转） | 同上，但会触发栈访问，验证栈假设 |
+| H | `artifacts-4K-HFS/boot.img` | `5dc38a0b4ea25aae585c6bcc211f01a0e11b31f8d6d56f0b3d7444e66ac5e825` | HFS，**4K 对齐**探针 | 验证"16K 对齐二进制 vs 4K 用户页"假设 |
+| I | `artifacts-4K-MOCKFS/boot.img` | `cd11c48cc8112f74b6c9c60ec036d5ea131802b73b22f3ef5beb2dc69e6e8909` | mockfs，4K 对齐探针 | H 的对照 |
+| **J** | `artifacts-OMNIDIAG/boot.img` | `ad979cd32ded0e002bed21354ad718f3c855c95a0f5bf277ad325654eb335cd2` | HFS，会写栈的探针，**全部探针** | **单镜像全诊断**（推荐先测） |
+
+### 推荐：先测 J
+
+J 把四类信息合在一个内核里，且**加载参数只在明显异常时才 panic**，所以一次上机可以拿到：
+
+- 若 `fuxi-load-bad: entry=… sp=… size=…` → 加载结果本身不可用（入口/栈参数错误）
+- 若 `fuxi-iabort-el0` → 取指落在没权限/没映射的页（入口地址问题最强信号）
+- 若 `fuxi-dabort-el0` → 数据访问故障（附 far/pc）
+- 若 `fuxi-vmfault: ret=… addr=… prot=…` → 故障判决（ret=2 即保护故障）
+- 若 `fuxi-sigbus: caller=…` → 内核主动投 SIGBUS
+- 若出现数字 / 无 panic → init 正常运行
 
 ## 探针一览（内核侧，先发生者先 panic）
 
@@ -67,8 +81,7 @@ wsl -d Ubuntu-24.04 -u root -- python3 /root/decode-el0.py "esr=96000045 far=100
 
 ## 建议顺序
 
-1. **F**（无栈）：如果它 panic 出 `fuxi-vmfault`，直接拿到判决
-2. **G**（写栈）：对比 F/G，判断栈是否参与
-3. **A**：拿 ESR 细节
-4. **D/E**：栈参数对比
-5. **B**：确认对照正常
+1. **J**（单镜像全诊断）：一次拿到判决/故障类型
+2. 若 J 显示入口/取指问题 → **H** 与 **I**（4K 对齐对比）
+3. **F/G**（无栈/写栈对比）
+4. **A**（ESR 细节）、**D/E**（加载参数对比）、**B**（对照）

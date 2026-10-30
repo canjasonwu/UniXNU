@@ -14,12 +14,15 @@
 #   E = artifacts-NAKED-MOCKFS/boot.img    mockfs root, same kernel and probe as D (control)
 #   F = artifacts-VMFAULT/boot.img         HFS root, vm_fault verdict, no-stack probe
 #   G = artifacts-VMFAULT-STACK/boot.img   HFS root, vm_fault verdict, stack-touching probe
+#   H = artifacts-4K-HFS/boot.img          HFS root, 4K-aligned probe
+#   I = artifacts-4K-MOCKFS/boot.img       mockfs root, 4K-aligned probe (control)
+#   J = artifacts-OMNIDIAG/boot.img        HFS root, every probe in one kernel (start here)
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -39,6 +42,9 @@ $images = @{
     E = 'C:\Users\Jason Wu\dsh\artifacts-NAKED-MOCKFS\boot.img'
     F = 'C:\Users\Jason Wu\dsh\artifacts-VMFAULT\boot.img'
     G = 'C:\Users\Jason Wu\dsh\artifacts-VMFAULT-STACK\boot.img'
+    H = 'C:\Users\Jason Wu\dsh\artifacts-4K-HFS\boot.img'
+    I = 'C:\Users\Jason Wu\dsh\artifacts-4K-MOCKFS\boot.img'
+    J = 'C:\Users\Jason Wu\dsh\artifacts-OMNIDIAG\boot.img'
 }
 
 $path = $images[$Image]

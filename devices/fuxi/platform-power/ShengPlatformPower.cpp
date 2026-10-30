@@ -362,3 +362,9 @@ fuxi_vmfault_panic(unsigned result, unsigned long long addr, unsigned prot, unsi
 	panic("fuxi-vmfault: ret=%x addr=%llx prot=%x pc=%llx sp=%llx",
 	    result, addr, prot, pc, sp);
 }
+
+extern "C" void
+fuxi_load_bad(unsigned long long entry, unsigned long long sp, unsigned long long size)
+{
+	panic("fuxi-load-bad: entry=%llx sp=%llx size=%llx", entry, sp, size);
+}
