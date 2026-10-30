@@ -89,6 +89,9 @@ def make_hfs(size_mib=64):
 # --dry-run builds the transfer ISO and stops before QEMU, which makes the plumbing testable without
 # starting a guest.
 LAUNCHD_OVERRIDE = None
+# Extra files dropped into the volume: repeated --file SRC:DEST (DEST relative to the
+# volume root), for dyld, shared caches, plists and other real root content.
+EXTRA_FILES = []
 DRY_RUN = False
 _argv = sys.argv[1:]
 _idx = 0
@@ -99,6 +102,16 @@ while _idx < len(_argv):
         continue
     if _argv[_idx] == '--dry-run':
         DRY_RUN = True
+        _idx += 1
+        continue
+    if _argv[_idx] == '--file' and _idx + 1 < len(_argv):
+        spec = _argv[_idx + 1]
+        source, _, destination = spec.partition(':')
+        if not source or not destination:
+            raise SystemExit(f'--file must be SRC:DEST: {spec}')
+        EXTRA_FILES.append((Path(source), destination))
+        _idx += 2
+        continue
     _idx += 1
 
 
@@ -116,7 +129,23 @@ def make_transfer():
             '/opt/unixnu-linux/CommandLineTools/usr/bin/clang', '-target', 'arm64-apple-ios17.0',
             '-nostdlib', '-static', '--ld-path=/opt/unixnu-linux/CommandLineTools/usr/bin/ld',
             '-Wl,-e,__start', '-o', str(launchd),
-            '/root/UniXNU/devices/fuxi/experiments/init-hfs-open.c'], check=True)
+            '/root/UniXNU/devices/fuxi/experiments/init-data.c'], check=True)
+    # Root filesystem skeleton: a real launchd needs these paths to exist even before
+    # anything is placed inside them.
+    SKELETON_DIRS = [
+        'sbin', 'usr/lib', 'usr/libexec', 'usr/bin', 'etc',
+        'private/var', 'private/preboot', 'private/etc',
+        'System/Library/Caches/com.apple.dyld', 'System/Library/LaunchDaemons',
+    ]
+    for directory in SKELETON_DIRS:
+        (CODE_DIR / directory).mkdir(parents=True, exist_ok=True)
+    for source, destination in EXTRA_FILES:
+        if not source.is_file():
+            raise SystemExit(f'--file source missing: {source}')
+        target = CODE_DIR / destination.lstrip('/')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        print('dropped:', target, target.stat().st_size, 'bytes')
     (CODE_DIR / 'hello.txt').write_text('fuxi HFS root\n')
     subprocess.run(['genisoimage', '-quiet', '-o', str(XFER), '-R', '-J', str(CODE_DIR)], check=True)
     print('transfer ISO:', XFER.stat().st_size, 'bytes')
@@ -125,7 +154,7 @@ def make_transfer():
 def make_seed():
     seed_dir = WORK / 'seed'
     seed_dir.mkdir(exist_ok=True)
-    (seed_dir / 'meta-data').write_text('instance-id: fuxi-hfs-populate-14\nlocal-hostname: hfs-pop\n')
+    (seed_dir / 'meta-data').write_text('instance-id: fuxi-hfs-populate-15\nlocal-hostname: hfs-pop\n')
     (seed_dir / 'user-data').write_text(USER_DATA)
     subprocess.run(['genisoimage', '-quiet', '-o', str(SEED), '-V', 'cidata', '-R', '-J',
                     str(seed_dir)], check=True)

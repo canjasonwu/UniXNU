@@ -327,6 +327,30 @@ extern "C" int native_ufs_read_window(const char *name, void *dst,
 - 若步骤 4 返回 `-1`（host bring-up 失败），先看驱动日志里的 `why`：最常见是电源域没开（见 6.7 的
   `powered` 值），其次是 DMA/SMMU 初始化。
 
+### 6.13 为真实 root 内容准备的投放机制（2026-10-31）
+
+填充脚本（`/root/hfs-populate/populate-hfs.py`）现在有两项能力，专为接真实 launchd/dyld 准备：
+
+1. **rootfs 骨架**：自动创建
+   `sbin`、`usr/lib`、`usr/libexec`、`usr/bin`、`etc`、`private/var`、`private/preboot`、
+   `private/etc`、`System/Library/Caches/com.apple.dyld`、`System/Library/LaunchDaemons`
+2. **任意文件投放**（可重复）：
+   ```bash
+   python3 populate-hfs.py --file /path/to/dyld:/usr/lib/dyld \
+       --file /path/to/dyld_shared_cache_arm64e:/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e
+   ```
+   `--file SRC:DEST`，`DEST` 相对卷根；缺失源文件会直接报错。
+   仍可用 `--launchd /path/to/launchd` 覆盖 `/sbin/launchd`。
+
+**`--dry-run` 会生成 transfer/seed ISO 并停止**（不启 QEMU），可用于快速核对骨架与投放结果：
+
+```
+dropped: /root/hfs-populate/xfer/usr/lib/rootfs-test.txt 13 bytes
+dry run: transfer ISO and seed built, not starting QEMU
+```
+
+### 6.14 下一步
+
 ### 6.13 下一步
 
 1. 若镜像 V 显示 `hook=1` 且驱动读到清单：把"分窗读入 RAM + sha256 校验"接到 RAM-root；
