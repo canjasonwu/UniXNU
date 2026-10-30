@@ -1,6 +1,6 @@
 # 待测镜像总清单（2026-10-31）
 
-> 快照：22 个 `boot.img`，全部在 `C:\Users\Jason Wu\dsh\artifacts-*\boot.img`。
+> 快照：23 个 `boot.img`，全部在 `C:\Users\Jason Wu\dsh\artifacts-*\boot.img`。
 > 完整性校验：`pwsh -NoProfile -File C:\Users\Jason Wu\dsh\verify-artifacts.ps1`（对 `artifacts-manifest.json`）
 
 ## 测试顺序（省轮次）
@@ -30,6 +30,7 @@
 | H | `5dc38a0b4ea2` | 162 MiB | HFS 根，4K 对齐探针 |
 | I | `cd11c48cc811` | 162 MiB | mockfs 根，4K 对齐探针（H 对照） |
 | J | `ad979cd32ded` | 162 MiB | HFS 根，全探针单镜像诊断 |
+| L | `d98b8dd3b1b5` | 162 MiB | 同 U（UFS 读窗口到 RAM），但驱动含低地址 DMA 兜底（4 次重试） |
 | K | `56190f401999` | 162 MiB | HFS 根，`getpid+exit(1)`（用户态判据） |
 | M | `2c2e693036d7` | 162 MiB | HFS 根，只调 `open("/hello.txt")`，退出码 5/6 |
 | N | `3765a9060581` | 162 MiB | HFS 根，带 `__DATA` 的探针（写全局 + open） |

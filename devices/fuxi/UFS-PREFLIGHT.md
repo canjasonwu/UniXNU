@@ -79,13 +79,25 @@ if (!gHost.virt || !gHost.phys || (gHost.phys & 4095) || contiguous < kDmaBytes 
 
 ## 4. 如果 CAP bit24 = 0（只支持 32 位 DMA）的应对
 
-按优先级：
+**已实现兜底**（`devices/fuxi/scripts/nativeufs-dma-fallback.py`，驱动侧、可重复执行）：
 
-1. **让分配落在 4 GiB 以下**：在驱动里改用 `IOMallocContiguous`/固定物理区，或先分配大块再按物理地址筛出低 4 GiB 子区间
-2. **减小 DMA 需求**：`kDmaBytes` 是固定值；若只需要读一个窗口，可以只读 4 KiB 块（驱动已有 `hostRead4k` 单块路径）
-3. **确认 ABL 是否留下 32 位可用的 DMA 区**：`owned_memory_size` 的窗口起点可以从 ADT/内存映射读出
+`hostBringUp` 现在会：
 
-这些都**不需要真机迭代**就能写，只需 CAP 的 bit24 值来定方向。
+1. 读 CAP bit24 判断是否支持 64 位 DMA
+2. **最多尝试 4 次**连续内存分配，保留第一个"物理地址 + kDmaBytes ≤ 4 GiB"的缓冲
+3. 每次拒绝都打日志：`NativeUfs: DMA attempt N rejected: phys=… contiguous=… dma64=…`
+4. 全部失败时 `why` 明确区分两种情况：
+   `DMA above 4 GiB with a 32-bit-only controller` 或 `dma buffer`
+
+对应的带兜底镜像：`artifacts-UFSREAD2/boot.img`（字母 **L**，参数 clock+read=1，与 U 相同但含兜底）。
+
+若仍失败，按优先级：
+
+1. **进一步降低 DMA 需求**：只读单个 4 KiB 块（驱动已有 `hostRead4k` 单块路径），避免整窗 DMA
+2. **确认 ABL 是否留下低 4 GiB 的连续区**：从 ADT 的内存映射里读出窗口基址
+3. **换用低地址固定区**：用 `IODeviceMemory` 映射一段已确认在 4 GiB 以下的物理区（需要知道确切地址）
+
+这些都**不需要真机迭代**就能写，只需 CAP 的 bit24 值与 DMA 日志来定方向。
 
 ## 5. 相关镜像一览
 

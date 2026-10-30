@@ -66,6 +66,12 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-HFS-EXIT1\\boot.img"
   },
   {
+    "Letter": "L",
+    "Bytes": 169619456,
+    "Sha256": "d98b8dd3b1b579dc956c4d907c75d66e4d02c46861f818b640c76a7126c24afb",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-UFSREAD2\\boot.img"
+  },
+  {
     "Letter": "M",
     "Bytes": 169619456,
     "Sha256": "2c2e693036d7422596527da1fbe1189fb2e8ea4f9dd320f759966034da9931b2",
