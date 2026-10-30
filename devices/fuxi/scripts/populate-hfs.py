@@ -131,11 +131,9 @@ def make_transfer():
         print('launchd override installed:', launchd, launchd.stat().st_size, 'bytes')
     elif True:  # always rebuild: the probe source changes between rounds
         subprocess.run([
-            '/opt/unixnu-linux/CommandLineTools/usr/bin/clang', '-target', 'arm64-apple-ios17.0',
-            '-nostdlib', '-static', '--ld-path=/opt/unixnu-linux/CommandLineTools/usr/bin/ld',
-            '-Wl,-e,__start', '-D_start=probe_main', '-o', str(launchd),
+            'python3', '/root/UniXNU/devices/fuxi/scripts/build-probe.py',
             '/root/UniXNU/devices/fuxi/experiments/init-data.c',
-            '/root/UniXNU/devices/fuxi/experiments/entry-align.S'], check=True)
+            '-o', str(launchd)], check=True)
     # Root filesystem skeleton: a real launchd needs these paths to exist even before
     # anything is placed inside them.
     SKELETON_DIRS = [

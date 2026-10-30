@@ -26,10 +26,8 @@ def run(command, **kwargs):
 
 
 def build_init(source, destination):
-    run([str(CLT / 'usr/bin/clang'), '-target', 'arm64-apple-ios17.0', '-nostdlib', '-static',
-         '--ld-path=' + str(CLT / 'usr/bin/ld'), '-Wl,-e,__start',
-         '-o', str(destination), str(source)])
-
+    run([sys.executable, str(ROOT / 'devices/fuxi/scripts/build-probe.py'),
+         str(source), '-o', str(destination)])
 
 def build_image(image, size_mib, init_binary):
     image.unlink(missing_ok=True)
