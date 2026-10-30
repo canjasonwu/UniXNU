@@ -33,6 +33,39 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\verify-artifacts.ps1"
 3. "panic 屏没显示是因为 vinfo 未绑定" —— 不是主因。真因是 panic blob 被放进了 **`__TEXT`（initprot=1，不可执行）**，已改到 `__TEXT_EXEC` 修复。
 4. "需要给 ADT 的 `ufshc` 补 `reg`" —— **不需要**。驱动用硬编码基址，启动钩子传的是 `IOPlatformExpertDevice`。
 
+## 2.5 最新假设：探针自己的 SP 未对齐（镜像 A2 验证）
+
+**证据（离线反汇编）**：旧探针入口第一条就是
+
+```
+__start:
+  100003e34: sub  sp, sp, #0x30
+  100003e38: stp  x29, x30, [sp, #0x20]     <-- 若 sp 不是 16 字节对齐，这里就触发对齐故障
+```
+
+- AArch64 ABI 要求 C 代码运行时 **sp 必须 16 字节对齐**
+- 内核 `exec_copyout_strings` 计算初始 sp 时只做 `stack -= string_size; stack -= ptr_area_size; stack -= ptr_size`，
+  **没有**把它 round 到 16
+- 因此内核交给用户的 sp 可能是 `8 (mod 16)`；此时探针的 `stp` 触发 **SP 对齐故障**（EC 0x26）→
+  走 `is_alignment_fault` 分支 → 模拟失败 → `codes[0]=EXC_ARM_DA_ALIGN` → **SIGBUS**
+- 这与"所有镜像都报 SIGBUS、且 vm_fault panic 从未触发"的观测完全吻合
+
+**修法**：新增入口桩 `devices/fuxi/experiments/entry-align.S`，先对齐 sp 再调用 C 主体：
+
+```
+__start:
+  mov x10, sp
+  mov x9, #0xf
+  bic x10, x10, x9
+  mov sp, x10
+  bl  _probe_main
+```
+
+探针用 `-D_start=probe_main` 编译，填充脚本已改为带上这个桩。
+
+**镜像 A2** = `artifacts-ALIGNED/boot.img`（`-Image A2`）：HFS 根 + `__DATA` 探针 + **对齐入口**。
+若 A2 不再 SIGBUS（而是给出 `exit status 20/21/22`），说明死因就是探针未对齐 sp。
+
 ## 3. 推荐测试顺序
 
 ### 第一优先：定性 + 硬件事实

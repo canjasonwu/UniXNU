@@ -6,6 +6,12 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SIGBUS\\boot.img"
   },
   {
+    "Letter": "A2",
+    "Bytes": 169619456,
+    "Sha256": "084b679eec7a25a1d8f5c08eee9f1182f5a9a66a7ac987e871a217f4d4b64e53",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-ALIGNED\\boot.img"
+  },
+  {
     "Letter": "B",
     "Bytes": 169619456,
     "Sha256": "e305ac6622458b7bdd3e2f0c9a372fb6d4ac597e0786ef186932a98188489eb5",
