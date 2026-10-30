@@ -43,6 +43,16 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image P
 | `exit status 22` | ✅ 用户态跑通，但 open 失败 | 查 HFS 用户态读路径 |
 | 仍是 SIGBUS | 死因不是 SP 未对齐 | 测 **C2**（类别数字 50/52/54）+ **T**（`a_esr`） |
 
+### K2（最小对齐探针：`getpid` + `exit(1)`）
+
+A2 的极简对照，用于分辨"是 `__DATA`/`open` 特有问题还是通用用户态问题"：
+
+| 输出 | 结论 |
+|---|---|
+| `… (signal 0, exit status 1)` | ✅ 最小用户态跑通（exec + syscall + exit 全链路 OK） |
+| `exit status 6` 或其他 | 探针自定义的其它分支（看 `init-exit7.c`） |
+| SIGBUS | 连最小探针都跑不起来 → 用 C2/T 深入 |
+
 ### P（UFS 只读体检）
 
 | 字段 | 含义 |
