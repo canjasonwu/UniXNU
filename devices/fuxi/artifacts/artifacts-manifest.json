@@ -1,0 +1,134 @@
+[
+  {
+    "Letter": "A",
+    "Bytes": 169619456,
+    "Sha256": "3ff5efdff5534600e3cb14dcfd126753f512038e5632a2f6de012b6f46122cde",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SIGBUS\\boot.img"
+  },
+  {
+    "Letter": "B",
+    "Bytes": 169619456,
+    "Sha256": "e305ac6622458b7bdd3e2f0c9a372fb6d4ac597e0786ef186932a98188489eb5",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SIGBUS-CONTROL\\boot.img"
+  },
+  {
+    "Letter": "C",
+    "Bytes": 169619456,
+    "Sha256": "9c166363127ce1bcbd59ccd87f63205a760e6e15fc44183c0ac7f573c908e963",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-HFS-NAKED\\boot.img"
+  },
+  {
+    "Letter": "D",
+    "Bytes": 169619456,
+    "Sha256": "a16cfc7557338994a2baaec0020cd17d6b6ff164e664cd3bbdc6487195a06160",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-LOADINFO\\boot.img"
+  },
+  {
+    "Letter": "E",
+    "Bytes": 169619456,
+    "Sha256": "d69d4be68f33e3fd40be7b80af2d96c034ad5c5e1ff5892f6db391af86e9e6bf",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-NAKED-MOCKFS\\boot.img"
+  },
+  {
+    "Letter": "F",
+    "Bytes": 169619456,
+    "Sha256": "636ba13dbda8e58991153ef23cb5a6d4a15ac8e3a4c57bf832770133f0c64b75",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-VMFAULT\\boot.img"
+  },
+  {
+    "Letter": "G",
+    "Bytes": 169619456,
+    "Sha256": "98be25d6ace5d776f92b38b7dcbe8bd91f19298c2e53bc2a6734f9460c8c9249",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-VMFAULT-STACK\\boot.img"
+  },
+  {
+    "Letter": "H",
+    "Bytes": 169619456,
+    "Sha256": "5dc38a0b4ea25aae585c6bcc211f01a0e11b31f8d6d56f0b3d7444e66ac5e825",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-4K-HFS\\boot.img"
+  },
+  {
+    "Letter": "I",
+    "Bytes": 169619456,
+    "Sha256": "cd11c48cc8112f74b6c9c60ec036d5ea131802b73b22f3ef5beb2dc69e6e8909",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-4K-MOCKFS\\boot.img"
+  },
+  {
+    "Letter": "J",
+    "Bytes": 169619456,
+    "Sha256": "ad979cd32ded0e002bed21354ad718f3c855c95a0f5bf277ad325654eb335cd2",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-OMNIDIAG\\boot.img"
+  },
+  {
+    "Letter": "K",
+    "Bytes": 169619456,
+    "Sha256": "56190f40199905ef8c51ed7a6dea455ac8165ae6f7109a33df2229d92e4e64b7",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-HFS-EXIT1\\boot.img"
+  },
+  {
+    "Letter": "M",
+    "Bytes": 169619456,
+    "Sha256": "2c2e693036d7422596527da1fbe1189fb2e8ea4f9dd320f759966034da9931b2",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-HFS-OPEN\\boot.img"
+  },
+  {
+    "Letter": "N",
+    "Bytes": 169619456,
+    "Sha256": "3765a90605816ecccba54946485448d40ac19226fa0028e3c803b38ae5a01a35",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-HFS-DATA\\boot.img"
+  },
+  {
+    "Letter": "P",
+    "Bytes": 169619456,
+    "Sha256": "5487c2bf146b1c45acae5212495543e9a09bff47bfb4691ee1bd081c6d2065aa",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-UFS-CAP\\boot.img"
+  },
+  {
+    "Letter": "R",
+    "Bytes": 169619456,
+    "Sha256": "56329a9d311b1a4abb5314ce17d01fda1868cff92b4548abc0f830feeb3afb34",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-UFSREAD-MOUNT\\boot.img"
+  },
+  {
+    "Letter": "S",
+    "Bytes": 421277696,
+    "Sha256": "416e16dd119dd10ff3d900e5e63d380f89d044bac5ca37c67310af900ad4842a",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SIZE256\\boot.img"
+  },
+  {
+    "Letter": "U",
+    "Bytes": 169619456,
+    "Sha256": "ca3f313b2b9e08ea228a70047fb04eefaaa878a263d741ddd6406798c100bd29",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-UFSREAD\\boot.img"
+  },
+  {
+    "Letter": "V",
+    "Bytes": 169619456,
+    "Sha256": "ed626a572459fa1d0213d44c43881301e3eaa328cc8c2c76148f1518f469af96",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-NATIVEUFS-START\\boot.img"
+  },
+  {
+    "Letter": "W",
+    "Bytes": 169619456,
+    "Sha256": "1339b20b8ae838ed6b4c4009469a818e8721c35b73ca9e45723c769e394ca3a5",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-UFS-CLOCK\\boot.img"
+  },
+  {
+    "Letter": "X",
+    "Bytes": 169619456,
+    "Sha256": "07726d8a5a671c34498b6729d9ff7f4ea919cfd3b95995dd753db7408fbedfa8",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-UFS-X\\boot.img"
+  },
+  {
+    "Letter": "Y",
+    "Bytes": 169619456,
+    "Sha256": "d98141a704445c6d1612af3aeb2a45a707fd8ecbafba834b6b305fb097230bee",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-MDEV\\boot.img"
+  },
+  {
+    "Letter": "Z",
+    "Bytes": 169619456,
+    "Sha256": "4d8f7163c63092183e84095277b7686578ec327cfde6ed4b7a485c487c507cc2",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-MDEV-REPORT\\boot.img"
+  }
+]
