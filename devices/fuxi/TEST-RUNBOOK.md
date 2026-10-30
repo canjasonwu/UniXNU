@@ -123,10 +123,27 @@ wsl -d Ubuntu-24.04 -u root -- python3 /root/UniXNU/devices/fuxi/scripts/decode-
 - 若刷过 userdata（M2 测试）：`fastboot erase userdata` 后正常启动 Android 即可恢复
 - 设备卡住：长按电源强制重启
 
-## 5. 重要背景（避免重复踩坑）
+## 5. 投放链离线演练（不需要设备、不需要 IPSW）
+
+一条命令跑通"真实内容"投放的整条链路（用合成根目录，检查器/投放/打包全都走真实代码路径）：
+
+```bash
+wsl -d Ubuntu-24.04 -u root -- bash /root/UniXNU/devices/fuxi/scripts/rehearse-intake.sh
+```
+
+它会依次做：
+
+1. 造一个合成 iOS 根（探针当 `launchd`/`dyld`，加一个页对齐、带 `dyld_v1` 魔数的 shared cache + 分片）
+2. `check-ios-root.py` 校验（必需路径、arm64 Mach-O、分片连续性）→ 期望 `result : ok`
+3. `populate-hfs.py --dry-run` 按打印出的投放清单造 transfer 树 → 逐个 `dropped:` 行确认
+4. `build-userdata-root.sh` 把卷打成 userdata 镜像并打印刷写/恢复命令
+
+实测最后一行输出 `rehearsal: ok`。**等你拿到真实 IPSW 根目录时，把 `--root` 换掉即可。**
+
+## 6. 重要背景（避免重复踩坑）
 
 1. **A–C2 这批镜像的探针入口没有对齐 sp**（`sub sp, sp, #0x30; stp …`）。若 SP 未对齐假设成立，
-   它们的 SIGBUS 可能来自探针自身，与内核/HFS 无关。**只有 A2 带对齐入口。**
+   它们的 SIGBUS 可能来自探针自身，与内核/HFS 无关。**A2 / K2 / A3 / A4 这几张才带对齐入口**（A3/A4 另有内核侧修复）。
 2. `namespace 2 subcode 0xa` = **SIGNAL / SIGBUS(10)**，不是 FairPlay/EXEC 解密。
 3. ADT **不需要**给 `ufshc` 补 `reg`：驱动用硬编码基址，钩子传的是 `IOPlatformExpertDevice`。
 4. `mdevadd(..., phys=0)` 的 base 是**内核虚拟地址**（`memdev.c` 里 `fvaddr = (mdBase<<12)+off` 后直接 `bcopy`）——
