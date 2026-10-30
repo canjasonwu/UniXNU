@@ -630,11 +630,22 @@ fuxi_ufs_read(void)
 		panic("fuxi-ufs-read: buffer has no kernel address");
 	}
 
+	/* mdevadd takes base >> 12 in virtual mode (bsd/dev/memdev.c computes
+	 * fvaddr = (mdBase << 12) + offset and bcopies from it), so both the buffer address and the
+	 * byte count must be page aligned or the shift would silently drop the low bits. */
+	if (((uintptr_t)virt & 4095) != 0) {
+		buffer->release();
+		panic("fuxi-ufs-read: buffer address %p is not page aligned", virt);
+	}
+
 	unsigned long long got = 0;
 	int result = fuxi_ufs_read_window_hook("OS", virt, bytes, &got);
 
 	if (result != 0) {
 		panic("fuxi-ufs-read: window read failed (%d), requested %u MiB", result, sizeMb);
+	}
+	if ((got & 4095) != 0 || got == 0) {
+		panic("fuxi-ufs-read: window reader returned %llu bytes (not a page multiple)", got);
 	}
 	int dev = mdevadd(-1, ((uint64_t)(uintptr_t)virt) >> 12, (unsigned int)(got >> 12), 0);
 	if (dev < 0) {
