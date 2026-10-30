@@ -22,6 +22,26 @@
 | **J** | `artifacts-OMNIDIAG/boot.img` | `ad979cd32ded0e002bed21354ad718f3c855c95a0f5bf277ad325654eb335cd2` | HFS，会写栈的探针，**全部探针** | **单镜像全诊断**（推荐先测） |
 | **K** | `artifacts-HFS-EXIT1/boot.img` | `56190f40199905ef8c51ed7a6dea455ac8165ae6f7109a33df2229d92e4e64b7` | HFS，`getpid+exit(1)` 探针 | **终审**：用户态是否真的执行过 |
 | **M** | `artifacts-HFS-OPEN/boot.img` | `2c2e693036d7422596527da1fbe1189fb2e8ea4f9dd320f759966034da9931b2` | HFS，只调 `open("/hello.txt")`，退出码 5=成功 / 6=失败 | 若 K 显示用户态能跑，用 M 定位 HFS 用户态读路径 |
+| **N** | `artifacts-HFS-DATA/boot.img` | `3765a90605816ecccba54946485448d40ac19226fa0028e3c803b38ae5a01a35` | HFS，**带 `__DATA` 段**的探针（写全局变量 + open） | 覆盖"有可写数据段"的布局，更接近真实二进制 |
+| **S** | `artifacts-SIZE256/boot.img` | `416e16dd119dd10ff3d900e5e63d380f89d044bac5ca37c67310af900ad4842a` | 421 MB boot.img（256 MiB ramdisk + 400 MiB payload） | **只测容量**：ABL 是否能接受这么大的镜像 |
+
+### 镜像 N 的判读
+
+| 屏幕 | 结论 |
+|---|---|
+| `… exit status 21` | ✅ 写 `__DATA` 成功 + 打开 `/hello.txt` 成功 |
+| `… exit status 22` | `__DATA` 正常，但 open 失败 |
+| `… exit status 23` | **`__DATA` 读写失败**（数据段权限/映射问题） |
+| 故障探针文字 | 按文字定位（数据段问题常表现为写入保护故障） |
+
+### 镜像 S 的用途（不含用户态实验）
+
+只回答一个问题：**421 MB 的 `fastboot boot` 镜像能否被接受**。
+
+| 现象 | 结论 |
+|---|---|
+| `Sending 'boot.img' (411404 KB) OKAY` | 大镜像可行 → 真实 root 有希望直接放进 payload |
+| 失败/超时 | 真实 root 必须走 userdata 路线（见 `ROUTE-TO-REAL-LAUNCHD.md`） |
 
 ### 镜像 M 的判读
 
