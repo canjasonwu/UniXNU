@@ -80,8 +80,42 @@ nm 统计 NativeUfs 符号：50 个（含 NativeUfsBlock 的 vtable/start/free/d
 
 > 内核现在可以链接 sheng 的 NativeUfs 读路径，下一步是在启动早期调用它，把 userdata 上的根镜像读进内存。
 
-### 6.4 下一步（下一轮离线任务）
+### 6.4 userdata 根镜像格式：已离线实现并可自检（2026-10-31）
 
-1. 写"userdata 根镜像读取"探针：初始化 UFS host → 读 `RootLayout` 清单 → 按 `RootWindowRead` 分窗读入 RAM → 校验 sha256；
-2. 用 panic/七段显示报告进度（例如：host ok / manifest ok / 读完 N 字节 / sha 校验结果）；
-3. 通过后把它接到现有 RAM-root 路径（替换 payload 里的 data ramdisk 来源）。
+内核侧读取逻辑来自 `drivers/NativeUfs/RootLayout.h`（`findRootLayout`）。格式（userdata 分区**偏移 0** 的 4096 字节块）：
+
+| 偏移 | 内容 |
+|---|---|
+| 0 | 魔数 `SHNGROOT`（`0x474e4853 0x544f4f52`） |
+| 8 | version = 1 |
+| 12 | 窗口数（1–4） |
+| 16 | `imageBytes`（u64，整个已刷镜像大小） |
+| 24 | 窗口表，每条 128 字节：`name[32]`（可打印 ASCII，NUL 结尾，唯一）、`offset`(u64, 4K 对齐, ≥4096)、`size`(u64, **512 对齐**, 非 0)、`+48`=512、`+52`=1、`+56`=sha256[32] |
+| 4064 | 前 4064 字节的 sha256 |
+
+**关键约束**（都已在工具里实现并被自检覆盖）：
+
+- `size % 512 == 0`，sha256 覆盖**落盘的那 `size` 字节**（所以载荷按 512 零填充后再算哈希）
+- `offset` 4K 对齐、窗口之间不得重叠（按 4K 向上取整后判断）
+- GPT 不在这个文件里：设备 LUN0 的 GPT 由内核读取来找 `userdata` 分区，镜像只是该分区的内容
+- `RootPublication.h` 的 `ufsBuildRootPlan` 要求窗口名里**同时存在 `SystemOS` 与 `OS`**（2–4 个窗口），
+
+  发布顺序为 `SystemOS` → 其它 → `OS`
+
+**工具**（新增，可离线自测）：
+
+```bash
+python3 devices/fuxi/scripts/root-manifest.py selftest
+python3 devices/fuxi/scripts/root-manifest.py build --out /tmp/userdata-root.img \
+    --window OS=/root/fuxi-root/root.hfs
+python3 devices/fuxi/scripts/root-manifest.py verify --image /tmp/userdata-root.img
+```
+
+自检内容：正常构建+校验、**篡改载荷被拒**（sha256 不符）、**篡改清单被拒**（清单哈希不符）。
+实测：用 64 MiB 的 HFS 卷作为 `OS` 窗口生成 67,112,960 字节镜像并通过校验。
+
+### 6.5 下一步
+
+1. 内核侧：扩展 `fuxi_ufs_inspect()`（已有，只读寄存器 + 分阶段 panic）为"启动 host → 读清单 → 分窗读入 RAM → 校验 sha256"，每步都用 panic 文字报告阶段；
+2. 读通后把 RAM 缓冲接到现有 RAM-root 路径（替换 payload 里的 data ramdisk）；
+3. 需要上机时：`fastboot flash userdata /tmp/userdata-root.img`（用户数据可丢，`fastboot erase userdata` 即恢复）。
