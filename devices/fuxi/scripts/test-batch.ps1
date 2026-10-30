@@ -30,12 +30,13 @@
 #   R = artifacts-UFSREAD-MOUNT/boot.img   same but silently switches the root to that md (mount test)
 #   P = artifacts-UFS-CAP/boot.img         read-only UFS preflight (power, clocks, CAP bits; no driver)
 #   L = artifacts-UFSREAD2/boot.img        like U but with the low-address DMA fallback in the driver
+#   O = artifacts-SIGBUS-STATE/boot.img    HFS root, SIGBUS probe now prints user pc/far/sp
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R', 'P', 'L')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R', 'P', 'L', 'O')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -71,6 +72,7 @@ $images = @{
     R = 'C:\Users\Jason Wu\dsh\artifacts-UFSREAD-MOUNT\boot.img'
     P = 'C:\Users\Jason Wu\dsh\artifacts-UFS-CAP\boot.img'
     L = 'C:\Users\Jason Wu\dsh\artifacts-UFSREAD2\boot.img'
+    O = 'C:\Users\Jason Wu\dsh\artifacts-SIGBUS-STATE\boot.img'
 }
 
 $path = $images[$Image]

@@ -84,6 +84,12 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-HFS-DATA\\boot.img"
   },
   {
+    "Letter": "O",
+    "Bytes": 169619456,
+    "Sha256": "b96533c22f735b40818584ef503dbb1713c638c4e803729db30dbe251558a50f",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SIGBUS-STATE\\boot.img"
+  },
+  {
     "Letter": "P",
     "Bytes": 169619456,
     "Sha256": "5487c2bf146b1c45acae5212495543e9a09bff47bfb4691ee1bd081c6d2065aa",
