@@ -58,8 +58,9 @@ write_files:
       find /mnt/root -maxdepth 3 | head -50
       ls -l /mnt/root/sbin 2>/dev/null
       echo "=== HASH CHECK ==="
-      sha256sum /mnt/root/sbin/launchd || echo "HASH FAILED"
-      wc -c /mnt/root/sbin/launchd
+      cd /mnt/root && find . -type f -exec sha256sum {} + | sort || echo "HASH FAILED"
+      echo "=== DIRS ==="
+      cd /mnt/root && find . -type d | sort
       umount /mnt/root || echo "UMOUNT ROOT FAILED"
       umount /mnt/xfer || true
       echo "POPULATE DONE"
@@ -116,6 +117,10 @@ while _idx < len(_argv):
 
 
 def make_transfer():
+    # Rebuild the transfer tree from scratch so leftovers from an earlier run cannot end up in
+    # the volume (which would also confuse the hash comparison below).
+    if CODE_DIR.is_dir():
+        shutil.rmtree(CODE_DIR)
     CODE_DIR.mkdir(parents=True, exist_ok=True)
     launchd = CODE_DIR / 'sbin' / 'launchd'
     launchd.parent.mkdir(parents=True, exist_ok=True)
@@ -154,11 +159,46 @@ def make_transfer():
 def make_seed():
     seed_dir = WORK / 'seed'
     seed_dir.mkdir(exist_ok=True)
-    (seed_dir / 'meta-data').write_text('instance-id: fuxi-hfs-populate-15\nlocal-hostname: hfs-pop\n')
+    (seed_dir / 'meta-data').write_text('instance-id: fuxi-hfs-populate-17\nlocal-hostname: hfs-pop\n')
     (seed_dir / 'user-data').write_text(USER_DATA)
     subprocess.run(['genisoimage', '-quiet', '-o', str(SEED), '-V', 'cidata', '-R', '-J',
                     str(seed_dir)], check=True)
     print('seed ISO:', SEED.stat().st_size, 'bytes')
+
+
+def verify_hashes(text):
+    """Compare the guest's sha256 inventory with the files we prepared for the volume.
+
+    The guest prints `sha256sum` lines for every file under /mnt/root, so a bad copy (short write,
+    wrong offset, filesystem bug) shows up as a mismatch instead of silently producing a volume that
+    only fails much later on the device.
+    """
+    import hashlib
+    import re
+    pattern = re.compile(r'^([0-9a-f]{64})\s+\./(.+)$')
+    checked = 0
+    problems = []
+    for line in text.splitlines():
+        # The serial log prefixes every guest line with "[time] process[pid]: "; keep only the payload.
+        payload = line.split(']: ', 1)[-1].strip() if ']: ' in line else line.strip()
+        match = pattern.match(payload)
+        if not match:
+            continue
+        digest, relative = match.group(1), match.group(2)
+        source = CODE_DIR / relative
+        checked += 1
+        if not source.is_file():
+            problems.append(f'unexpected file in the volume: {relative}')
+            continue
+        actual = hashlib.sha256(source.read_bytes()).hexdigest()
+        if actual != digest:
+            problems.append(f'hash mismatch: {relative} (volume {digest[:16]}, source {actual[:16]})')
+    prepared = [path for path in CODE_DIR.rglob('*') if path.is_file()] if CODE_DIR.is_dir() else []
+    if checked and len(prepared) != checked:
+        problems.append(f'volume has {checked} files but {len(prepared)} were prepared')
+    if not checked:
+        problems.append('no hash lines found in the guest log')
+    return checked, problems
 
 
 def qemu():
@@ -187,7 +227,16 @@ def qemu():
         if any(marker in line for marker in ('POPULATE DONE', 'HFS MOUNT FAILED', 'COPY FAILED',
                                              'HFS CONTENT', 'MOUNT FAILED', 'hfsplus')):
             print('  guest:', line.strip())
-    return 0 if 'POPULATE DONE' in text else 1
+    if 'POPULATE DONE' not in text:
+        return 1
+    checked, problems = verify_hashes(text)
+    print(f'volume hash check: {checked} file(s) compared')
+    for problem in problems:
+        print('  PROBLEM:', problem)
+    if problems:
+        return 1
+    print('volume hash check: ok')
+    return 0
 
 
 if __name__ == '__main__':
