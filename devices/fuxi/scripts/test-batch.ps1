@@ -16,13 +16,14 @@
 #   G = artifacts-VMFAULT-STACK/boot.img   HFS root, vm_fault verdict, stack-touching probe
 #   H = artifacts-4K-HFS/boot.img          HFS root, 4K-aligned probe
 #   I = artifacts-4K-MOCKFS/boot.img       mockfs root, 4K-aligned probe (control)
-#   J = artifacts-OMNIDIAG/boot.img        HFS root, every probe in one kernel (start here)
+#   J = artifacts-OMNIDIAG/boot.img        HFS root, every probe in one kernel
+#   K = artifacts-HFS-EXIT1/boot.img       HFS root, getpid+exit(1) probe (did userland run?)
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -45,6 +46,7 @@ $images = @{
     H = 'C:\Users\Jason Wu\dsh\artifacts-4K-HFS\boot.img'
     I = 'C:\Users\Jason Wu\dsh\artifacts-4K-MOCKFS\boot.img'
     J = 'C:\Users\Jason Wu\dsh\artifacts-OMNIDIAG\boot.img'
+    K = 'C:\Users\Jason Wu\dsh\artifacts-HFS-EXIT1\boot.img'
 }
 
 $path = $images[$Image]
