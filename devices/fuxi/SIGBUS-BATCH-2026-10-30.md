@@ -20,6 +20,7 @@
 |---|---|---|---|---|
 | A | `artifacts-SIGBUS/boot.img` | `3ff5efdff5534600e3cb14dcfd126753f512038e5632a2f6de012b6f46122cde` | HFS+ 卷（探针：getpid → open("/hello.txt") → write → 空转） | **主实验**：抓 SIGBUS 来源 |
 | B | `artifacts-SIGBUS-CONTROL/boot.img` | `e305ac6622458b7bdd3e2f0c9a372fb6d4ac597e0786ef186932a98188489eb5` | mockfs（普通 Mach-O init，退出码 1） | **对照**：同一内核、无 HFS，验证 panic 屏与用户态 exec 正常 |
+| C | `artifacts-HFS-NAKED/boot.img` | `9c166363127ce1bcbd59ccd87f63205a760e6e15fc44183c0ac7f573c908e963` | HFS+ 卷（探针：**无栈**裸汇编，`mov x0,#7; mov x16,#1; svc #0x80` 后空转） | **栈假设实验**：完全不碰用户栈 |
 
 ## 判读表
 
@@ -32,6 +33,14 @@
 | `fuxi-sigbus: caller=… pid=…` | SIGBUS 是**内核主动投递**的 | caller 地址可反查函数（把地址发我，我用 payload 内核符号表解析） |
 | 只有三个数字（无 panic） | init 在正常空转 | ✅ 用户态跑起来了，SIGBUS 问题消失 |
 
+### 镜像 C（无栈探针，HFS 根）
+
+| 屏幕 | 结论 |
+|---|---|
+| 数字（无 fault/sigbus panic）或其它 init 消息 | ✅ 说明出问题的是**用户栈相关访问**；C 能跑而 A 不能 → 初始栈权限/位置有问题 |
+| `fuxi-dabort-el0: …` / `fuxi-iabort-el0: …` | ❗ 连不碰栈的探针也故障 → 不在栈，而在代码页映射或线程初始状态 |
+| `fuxi-sigbus: …` | 内核主动投 SIGBUS，看 caller 反查函数 |
+
 ### 镜像 B（对照）
 
 | 屏幕 | 结论 |
@@ -39,6 +48,26 @@
 | `initproc failed to start … (signal 0, exit status 1)` | ✅ panic 屏正常 + mockfs 下 init 能执行并正常退出 |
 | `fuxi-*` 探针文字 | ❗ 说明故障与 HFS 无关，是内核侧问题（exec/线程状态） |
 | 只有数字 | 说明 mockfs 下 init 也没跑起来（退化） |
+
+## 一键脚本
+
+```powershell
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image A
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image B
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image C
+```
+
+脚本只做 `fastboot boot`（不写存储、不擦除），会先等设备进 fastboot。
+
+## 判读辅助
+
+拿到 `fuxi-*-abort-el0: esr=… far=… pc=…` 后：
+
+```powershell
+wsl -d Ubuntu-24.04 -u root -- python3 /root/decode-el0.py "esr=96000045 far=1000000f0 pc=1000004c8"
+```
+
+输出 EC/FSC 含义、读/写、权限/未映射、用户 PC 相对基址的偏移与对应字节。
 
 ## 上机步骤（每个镜像）
 
