@@ -354,3 +354,11 @@ fuxi_load_panic(unsigned long long entry, unsigned long long sp, unsigned long l
 {
 	panic("fuxi-load: entry=%llx sp=%llx stack=%llx size=%llx", entry, sp, stack, size);
 }
+
+extern "C" void
+fuxi_vmfault_panic(unsigned result, unsigned long long addr, unsigned prot, unsigned long long pc,
+    unsigned long long sp)
+{
+	panic("fuxi-vmfault: ret=%x addr=%llx prot=%x pc=%llx sp=%llx",
+	    result, addr, prot, pc, sp);
+}
