@@ -151,7 +151,33 @@ extern "C" int native_ufs_probe_start(void);   /* 由 devices/fuxi/scripts/nativ
 | `fuxi-ufs-start: driver not linked` | 镜像不是 `NATIVE_UFS=y` 构建 |
 | 驱动自己的 `bring-up failed: <why>` | 硬件初始化失败（why 指出阶段） |
 
-### 6.6 下一步
+### 6.7 UFS 时钟使能探针（镜像 W）
+
+驱动**不会自己开电源/时钟**（`hostBringUp` 直接映射控制器就用）。它的只读 `inspect` 也只是**检查**
+GDSCR/CBCR。所以单独做了只写"时钟分支使能位"的探针：
+
+- boot arg `fuxi-ufs-clock=1` 触发；写前/写后都读回并通过 panic 打印
+- 只写 **bit0（branch enable）**：AXI(0x77018)、AHB(0x77024)、AGGRE(0x770e4)、UNIPRO(0x77068)、
+  TX(0x77028)、RX(0x7702c)、PHY_AUX(0x770b0)；**绝不碰** reset、RPMh/TCSR、QMP PHY
+- GDSCR（0x77004）只读：`bit31=PWR_ON`。**不自己上电**（需要 RPMh），只在文字里报告 `powered=0/1`
+
+**镜像 W**：`artifacts-UFS-CLOCK/boot.img = 1339b20b8ae838ed6b4c4009469a818e8721c35b73ca9e45723c769e394ca3a5`
+（默认 `NATIVE_UFS=n` 内核，无驱动；内核参数 `fuxi-ufs-clock=1`）
+
+判读：
+
+| 屏幕 | 含义 |
+|---|---|
+| `fuxi-ufs-clock: powered=1 …` | ✅ UFS 电源域已开（ABL 遗留），时钟分支值也已打印 |
+| `powered=0` | 电源域没开 → 驱动 bring-up 必然失败，需要先解决 RPMh 上电 |
+| `after` 与 `before` 相比对应 bit0 由 0→1 | ✅ 时钟使能写入生效 |
+| GCC map failed | 物理窗口映射失败（地址/内存描述符问题） |
+
+下一步（按 powered 的真值分支）：
+- `powered=1`：把时钟使能并入镜像 V 的启动路径（`fuxi_ufs_start` 之前调用），再测驱动 bring-up；
+- `powered=0`：先解决 RPMh 上电（或确认 ABL 是否会保持 UFS 电源）。
+
+### 6.8 下一步
 
 1. 若镜像 V 显示 `hook=1` 且驱动读到清单：把"分窗读入 RAM + sha256 校验"接到 RAM-root；
 2. 若 hook<0：把 provider 搜索换成 `IORegistryEntry::fromPath("/device-tree", gIODTPlane)` 等备选路径；
