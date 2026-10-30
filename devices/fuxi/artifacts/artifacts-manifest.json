@@ -18,6 +18,12 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-HFS-NAKED\\boot.img"
   },
   {
+    "Letter": "C2",
+    "Bytes": 169619456,
+    "Sha256": "0db35a1a5e1914a5caeeb8a4e49032dbc4f6c5b8fe2c0c070a8e266532ed2bfd",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SIGBUS-CLASS\\boot.img"
+  },
+  {
     "Letter": "D",
     "Bytes": 169619456,
     "Sha256": "a16cfc7557338994a2baaec0020cd17d6b6ff164e664cd3bbdc6487195a06160",

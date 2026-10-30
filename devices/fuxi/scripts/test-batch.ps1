@@ -33,12 +33,13 @@
 #   O = artifacts-SIGBUS-STATE/boot.img    HFS root, SIGBUS probe now prints user pc/far/sp
 #   Q = artifacts-PAGEIN/boot.img          O plus the page-in trace (last HFS read) in the same panic line
 #   T = artifacts-ABORT-RING/boot.img      Q plus the EL0 abort ring (far/pc/esr/code/type of the last abort)
+#   C2 = artifacts-SIGBUS-CLASS/boot.img   T plus class marks 50/52/54 for the SIGBUS-producing branches
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R', 'P', 'L', 'O', 'Q', 'T')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R', 'P', 'L', 'O', 'Q', 'T', 'C2')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -77,6 +78,7 @@ $images = @{
     O = 'C:\Users\Jason Wu\dsh\artifacts-SIGBUS-STATE\boot.img'
     Q = 'C:\Users\Jason Wu\dsh\artifacts-PAGEIN\boot.img'
     T = 'C:\Users\Jason Wu\dsh\artifacts-ABORT-RING\boot.img'
+    C2 = 'C:\Users\Jason Wu\dsh\artifacts-SIGBUS-CLASS\boot.img'
 }
 
 $path = $images[$Image]
