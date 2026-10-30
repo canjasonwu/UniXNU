@@ -250,7 +250,43 @@ dev_t mdevlookup(int devid);
 
 > 这一步**不碰 UFS 硬件**：数据仍来自 payload 的 RAMDisk，只是把"注册 md + 切根"这条 M2 必需的机制先用现有内容验证通。
 
-### 6.11 下一步
+### 6.11 读窗口到内存的完整链路（2026-10-31 已实现、待真机）
+
+驱动自身的"发布根窗口"走 IOStorageFamily（我们只有桩，运行时不可用），所以补了一个**只读读取钩子**，
+写进驱动自己的编译单元（复用它的 `hostBringUp` / `findRootLayout` / `hostRead4k` / SHA256）：
+
+```c
+extern "C" int native_ufs_read_window(const char *name, void *dst,
+                                      unsigned long long maxBytes,
+                                      unsigned long long *outBytes);
+/* 0 成功；-1 host bring-up；-2 内存；-3 GPT/清单解析；-4 清单被拒；
+   -5 窗口名不存在；-6 大小/对齐；-7 读失败；-8 sha256 不符 */
+```
+
+内核侧（`ShengPlatformPower.cpp`）新增 `fuxi_ufs_read()`，由 boot arg 控制：
+
+| boot arg | 行为 |
+|---|---|
+| `fuxi-ufs-read=1` | 分配 wired 缓冲（`fuxi-ufs-read-mb`，默认 96 MiB）→ 读 `OS` 窗口 → `mdevadd` 注册 → **panic 报告结果** |
+| `fuxi-ufs-read=2` | 同上但**静默**，交给 `setconf()` 的 `rootdev` 覆盖去挂载 |
+
+读取钩子通过**构造函数注册**（`fuxi_ufs_read_window_hook` 指针，platform-power 拥有并初始化为 NULL；
+`NativeUfsStartHook.cpp` 在驱动链接时装入）——所以 `CONFIG_XNU_NATIVE_UFS=n` 的内核照常链接。
+
+**镜像 UFSREAD**：`artifacts-UFSREAD/boot.img = ca3f313b2b9e08ea228a70047fb04eefaaa878a263d741ddd6406798c100bd29`
+（`NATIVE_UFS=y`，参数 `fuxi-ufs-clock=1 fuxi-ufs-read=1 fuxi-ufs-read-mb=96`）
+
+判读：
+
+| 屏幕 | 含义 | 下一步 |
+|---|---|---|
+| `fuxi-ufs-read: ok dev=0x.. bytes=..` | ✅ UFS 读通、窗口校验通过、md 注册成功 | 改成 `fuxi-ufs-read=2` 测"HFS 从 md 挂根" |
+| `window read failed (-1)` | host bring-up 失败（电源/时钟/DMA/SMMU） | 看驱动日志里的 `why`；必要时解决 RPMh |
+| `window read failed (-3/-4)` | GPT 或清单解析失败 | 检查 userdata 是否已按 6.4 刷入镜像 |
+| `window read failed (-8)` | sha256 不符 | 写入/读取不一致，检查刷写方式 |
+| `driver not linked` | 镜像不是 `NATIVE_UFS=y` 构建 | 用 UFSREAD 镜像 |
+
+### 6.12 下一步
 
 1. 若镜像 V 显示 `hook=1` 且驱动读到清单：把"分窗读入 RAM + sha256 校验"接到 RAM-root；
 2. 若 hook<0：把 provider 搜索换成 `IORegistryEntry::fromPath("/device-tree", gIODTPlane)` 等备选路径；
