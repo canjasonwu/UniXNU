@@ -373,7 +373,52 @@ python3 devices/fuxi/scripts/check-ios-root.py check --root /path/to/ios-root --
 
 自检（`selftest`）验证三件事：有效根被接受、缺 dyld 被拒、非法 Mach-O 被拒。
 
-### 6.15 下一步
+### 6.15 写入完整性校验（2026-10-31，已端到端验证）
+
+填充流程现在做**全卷哈希比对**，不再只校验 launchd：
+
+1. guest 侧：`cd /mnt/root && find . -type f -exec sha256sum {} + | sort`，并单独列出所有目录
+2. 宿主侧：解析串口日志里的 `<sha256>  ./<path>` 行，与本地准备好的文件逐个比对；文件数不一致、
+   出现多余文件、哈希不符、或完全没找到清单，都会**让填充脚本以非 0 退出**
+
+实测（干净重跑）：
+
+```
+volume hash check: 2 file(s) compared
+volume hash check: ok
+```
+
+已验证的三种失败路径：哈希不符、清单缺失、文件数不匹配。
+
+同时修掉一个隐患：`make_transfer()` 现在**每次先清空 `xfer/`**，避免上一轮残留文件被卷进镜像、
+并影响哈希比对（实测上一轮就是因为残留的 `usr/lib/rootfs-test.txt` 多出一个文件）。
+
+产出物：带完整 rootfs 骨架的干净卷 `/root/fuxi-root/root-skeleton.hfs`
+（64 MiB，`482b`，含 `sbin/launchd` 与 `hello.txt` 两个文件、15 个目录）。
+
+### 6.16 刷写计划的自动化与 shared cache 分片校验（2026-10-31）
+
+**`flash-plan --getvar <文件>`**：直接把 `fastboot getvar partition-size:userdata` 的输出存成文件，
+工具会自动解析并给出结论（支持的格式：`(bootloader) partition-size:userdata: 0x…`、
+`partition-size:userdata: 0x…`、`userdata-size: 0x…` 或纯十进制）：
+
+| 场景 | 输出 |
+|---|---|
+| 镜像小于分区（分区 ≤ 2 GiB） | `pad-to : <分区字节数>`（建议按分区填充） |
+| 镜像小于分区（分区 > 2 GiB） | `pad-to : not needed`（填充只会变慢） |
+| 镜像大于分区 | `fits : NO` + 重建建议 |
+
+**`check-ios-root.py` 的 shared cache 分片校验**：现在会检查
+
+- 基础缓存文件是否以 **`dyld_v1`** 魔数开头
+- 基础文件与每个分片是否 **4096 对齐**
+- 分片编号是否从 `.01` 连续（缺号会报 `shared cache shard gap`）
+- 目录里是否有非分片命名的多余文件
+
+自测（`selftest`）已覆盖：有效根接受、缺 dyld 拒绝、非法 Mach-O 拒绝，且内置的合成 cache 数据
+满足新规则（`dyld_v1` + 4096 对齐 + `.01` 分片）。
+
+### 6.17 下一步
 
 ### 6.13 下一步
 

@@ -110,6 +110,40 @@ def filesize(path):
         return 0
 
 
+DYLD_CACHE_MAGIC = b'dyld_v1'
+
+
+def shared_cache_notes(base):
+    """Return (notes, problems) for a dyld shared cache file and its numbered shards."""
+    notes = []
+    problems = []
+    try:
+        with base.open('rb') as handle:
+            header = handle.read(16)
+    except OSError as error:
+        return notes, ['cannot read shared cache: %s' % error]
+    if not header.startswith(DYLD_CACHE_MAGIC):
+        problems.append('shared cache does not start with the dyld_v1 magic')
+    size = filesize(base)
+    if size % 4096:
+        problems.append('shared cache size %d is not 4096-aligned' % size)
+    parts = sorted(base.parent.glob(base.name + '.*'))
+    expected = 1
+    for part in parts:
+        suffix = part.name[len(base.name) + 1:]
+        if not suffix.isdigit():
+            problems.append('unexpected shared cache file: %s' % part.name)
+            continue
+        if int(suffix) != expected:
+            problems.append('shared cache shard gap: expected .%02d, found %s' % (expected, part.name))
+        expected = int(suffix) + 1
+        if filesize(part) % 4096:
+            problems.append('shared cache shard %s is not 4096-aligned' % part.name)
+    if parts:
+        notes.append('%d shard(s) present, contiguous from .01' % len(parts))
+    return notes, problems
+
+
 def check(root):
     report = {'problems': [], 'warnings': [], 'files': {}}
 
@@ -143,6 +177,9 @@ def check(root):
         parts = sorted(base.parent.glob(base.name + '.*'))
         cache['parts'] = [(part.name, filesize(part)) for part in parts]
         cache['total'] = cache['size'] + sum(size for _name, size in cache['parts'])
+        notes, cache_problems = shared_cache_notes(base)
+        cache['notes'] = notes
+        report['problems'].extend(cache_problems)
 
     launchd = report['files'].get('launchd')
     if launchd and launchd.get('dylinker'):
@@ -186,6 +223,8 @@ def print_report(root, report, print_command):
         if entry.get('parts'):
             print('  parts   : %d extra cache file(s), total %d bytes'
                   % (len(entry['parts']), entry['total']))
+        for note in entry.get('notes', []):
+            print('  note    : %s' % note)
     if report['problems']:
         print()
         print('problems:')
@@ -254,8 +293,11 @@ def command_selftest(_args):
         fake_macho(root / 'usr/lib/dyld', with_dylibs=False)
         cache = root / 'System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64e'
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_bytes(b'cache' * 1000)
-        (cache.parent / 'dyld_shared_cache_arm64e.01').write_bytes(b'part' * 100)
+        # A cache has to carry the dyld_v1 magic and be page aligned, and its shards follow the same
+        # rule; the selftest data must satisfy that or the new shard checks fire on purpose.
+        header = b'dyld_v1   arm64e'
+        cache.write_bytes(header + bytes(4096 - len(header)))
+        (cache.parent / 'dyld_shared_cache_arm64e.01').write_bytes(bytes(4096))
 
         report = check(root)
         assert not report['problems'], report['problems']

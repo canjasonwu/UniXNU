@@ -226,6 +226,29 @@ def command_selftest(_args):
     return 0
 
 
+def parse_getvar(text):
+    """Extract the userdata partition size in bytes from a captured "fastboot getvar" output.
+
+    Accepted forms, as printed by fastboot on various versions:
+        (bootloader) partition-size:userdata: 0x1d4c00000
+        partition-size:userdata: 0x1d4c00000
+        userdata-size: 0x1d4c00000
+        userdata-size: 780140544
+    """
+    import re
+    patterns = [
+        r'partition[-_]size:\s*userdata\s*:\s*(0x[0-9a-fA-F]+|\d+)',
+        r'userdata[-_]size\s*:\s*(0x[0-9a-fA-F]+|\d+)',
+        r'partition[-_]size\s*:\s*userdata\s*:\s*(0x[0-9a-fA-F]+|\d+)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            value = match.group(1)
+            return int(value, 16) if value.lower().startswith('0x') else int(value, 10)
+    return None
+
+
 def command_flash_plan(args):
     """Print the exact flashing and recovery commands for an assembled userdata image.
 
@@ -241,10 +264,30 @@ def command_flash_plan(args):
         raise LayoutError(f"image size {len(raw)} is not a positive multiple of {BLOCK}")
     info = verify_image(path)
     digest = hashlib.sha256(raw).hexdigest()
+    partition = None
+    if getattr(args, 'getvar', None):
+        capture = Path(args.getvar)
+        if not capture.is_file():
+            raise LayoutError(f"missing getvar capture: {capture}")
+        partition = parse_getvar(capture.read_text(errors='replace'))
+        if partition is None:
+            raise LayoutError(f"no userdata partition size found in {capture}")
     print(f"image      : {path}")
     print(f"bytes      : {len(raw)}")
     print(f"sha256     : {digest}")
     print(f"manifest   : ok, {len(info['windows'])} window(s), image bytes {info['image_bytes']}")
+    if partition is not None:
+        fits = len(raw) <= partition
+        print(f"partition  : {partition} bytes (userdata)")
+        print(f"fits       : {'yes' if fits else 'NO - the image is larger than the partition'}")
+        if fits and len(raw) < partition:
+            if partition <= 2 * 1024 * 1024 * 1024:
+                print(f"pad-to     : {partition}   # keeps the flash aligned with the partition size")
+            else:
+                print(f"pad-to     : not needed   # the partition is {partition} bytes; padding the "
+                      "flash to that size would only make it slower")
+        if not fits:
+            print("             rebuild with a smaller OS window or use a larger partition image")
     print()
     print("flash (data loss on userdata is expected and reversible):")
     print(f'  fastboot flash userdata "{path}"')
@@ -283,6 +326,7 @@ def main(argv):
 
     flash = sub.add_parser("flash-plan", help="print the flashing and recovery commands for an image")
     flash.add_argument("--image", required=True)
+    flash.add_argument("--getvar", help="captured output of fastboot getvar partition-size:userdata")
     flash.set_defaults(func=command_flash_plan)
 
     args = parser.parse_args(argv)
