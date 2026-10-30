@@ -96,6 +96,12 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-UFS-CAP\\boot.img"
   },
   {
+    "Letter": "Q",
+    "Bytes": 169619456,
+    "Sha256": "283f52c2928e6a8c3f3daca2a85f11b804b06e0547b2835ee7f196922f52c433",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-PAGEIN\\boot.img"
+  },
+  {
     "Letter": "R",
     "Bytes": 169619456,
     "Sha256": "56329a9d311b1a4abb5314ce17d01fda1868cff92b4548abc0f830feeb3afb34",

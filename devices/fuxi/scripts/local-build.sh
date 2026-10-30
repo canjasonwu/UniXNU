@@ -53,6 +53,19 @@ cp devices/fuxi/platform-power/ShengPlatformPower.cpp    out/fuxi/tree/devices/f
 cp scripts/build-fuxi-platform-power.py out/fuxi/tree/scripts/ 2>/dev/null || true
 cp devices/fuxi/scripts/build-arm-driver.py out/fuxi/tree/scripts/ 2>/dev/null || true
 
+# The HFS sources are compiled outside the XNU build system and linked with -force_load, so a
+# change under bsd/sweet_hfs is invisible to the kernel build unless this archive is rebuilt first.
+# It used to be a manual step, which produced a link failure with an undefined fuxi_* helper; keep it
+# in the pipeline so every build produces an archive that matches the patched sources.
+step "build the HFS archive"
+python3 devices/fuxi/scripts/build-sweet-hfs.py > out/fuxi/logs/build-sweet-hfs.log 2>&1 || {
+  echo "build-sweet-hfs failed, see out/fuxi/logs/build-sweet-hfs.log" >&2
+  tail -20 out/fuxi/logs/build-sweet-hfs.log >&2
+  exit 1
+}
+mkdir -p out/fuxi/tree/build/sweet-hfs
+cp build/sweet-hfs/libSweetHFS.a out/fuxi/tree/build/sweet-hfs/libSweetHFS.a
+
 step "prepare the firmware tree"
 bash devices/fuxi/scripts/prepare-firmware.sh --uefi uefi-fuxi --watchdog-seconds 90
 
