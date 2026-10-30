@@ -647,3 +647,50 @@ fuxi_ufs_read(void)
 		    (unsigned)dev, got);
 	}
 }
+
+/*
+ * EL0 abort ring: the last few user aborts seen by the exception handler.
+ *
+ * The SIGBUS probe reports the newest entry, which answers whether the fault was a translation
+ * fault, a permission fault, an external abort, and which address/protection pair it named. It also
+ * distinguishes "the fault was handled but the process still got SIGBUS" from "no abort reached the
+ * handler at all".
+ */
+struct fuxi_fault_entry {
+	unsigned long long far;
+	unsigned long long pc;
+	unsigned int esr;
+	unsigned int fault_code;
+	unsigned int fault_type;
+	unsigned int pad;
+};
+
+static struct fuxi_fault_entry fuxi_fault_ring[8];
+static unsigned int fuxi_fault_count;
+
+extern "C" void
+fuxi_fault_record(unsigned long long far, unsigned esr, unsigned fault_code, unsigned fault_type,
+    unsigned long long pc)
+{
+	unsigned int slot = fuxi_fault_count & 7u;
+	fuxi_fault_ring[slot].far = far;
+	fuxi_fault_ring[slot].pc = pc;
+	fuxi_fault_ring[slot].esr = esr;
+	fuxi_fault_ring[slot].fault_code = fault_code;
+	fuxi_fault_ring[slot].fault_type = fault_type;
+	fuxi_fault_count++;
+}
+
+extern "C" void
+fuxi_fault_last(unsigned long long *far, unsigned long long *pc, unsigned *esr,
+    unsigned *fault_code, unsigned *fault_type, unsigned *total)
+{
+	if (total) *total = fuxi_fault_count;
+	if (fuxi_fault_count == 0) return;
+	unsigned int slot = (fuxi_fault_count - 1u) & 7u;
+	if (far) *far = fuxi_fault_ring[slot].far;
+	if (pc) *pc = fuxi_fault_ring[slot].pc;
+	if (esr) *esr = fuxi_fault_ring[slot].esr;
+	if (fault_code) *fault_code = fuxi_fault_ring[slot].fault_code;
+	if (fault_type) *fault_type = fuxi_fault_ring[slot].fault_type;
+}

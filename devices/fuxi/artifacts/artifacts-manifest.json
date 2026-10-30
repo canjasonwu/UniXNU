@@ -114,6 +114,12 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SIZE256\\boot.img"
   },
   {
+    "Letter": "T",
+    "Bytes": 169619456,
+    "Sha256": "e82ed508f3aac868ccbbe96bc25266b1e2afee67cf94e448c3776e48a54d4626",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-ABORT-RING\\boot.img"
+  },
+  {
     "Letter": "U",
     "Bytes": 169619456,
     "Sha256": "ca3f313b2b9e08ea228a70047fb04eefaaa878a263d741ddd6406798c100bd29",
