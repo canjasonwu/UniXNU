@@ -84,7 +84,18 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image K
 | `window read failed (-8)` | sha256 不符 | 检查刷写方式 |
 | `fuxi-ufs-clock: powered=0` | 电源域没开 | 需要 RPMh 上电，别在驱动侧耗 |
 
-辅助解码：
+辅助解码（**新**，一行 panic 文本即可解析地址与 ESR）：
+
+```bash
+wsl -d Ubuntu-24.04 -u root -- python3 /root/UniXNU/devices/fuxi/scripts/decode-panic.py decode \
+  --text "fuxi-sigbus: caller=0xfffffff007a2ea40 pid=1 pc=0x1000004c8 far=0x100000fc8 sp=0x16fdfe000 reads=2 last_off=8192 last_resid=0 last_err=0 aborts=1 a_far=100000fc8 a_pc=1000004c8 a_esr=9600000f a_code=2 a_type=3"
+```
+
+输出：每个内核地址的 `符号+偏移`、ESR 的 `EC/FSC/WnR` 解码、pc/far 关系判定、页入与中止计数。
+
+自检：`python3 devices/fuxi/scripts/decode-panic.py selftest`（4 项断言）。
+
+旧版 EL0 解码：
 
 ```powershell
 wsl -d Ubuntu-24.04 -u root -- python3 /root/decode-el0.py "esr=96000045 far=1000000f0 pc=1000004c8"
