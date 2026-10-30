@@ -21,12 +21,13 @@
 #   M = artifacts-HFS-OPEN/boot.img        HFS root, open-only probe (exit 5 opened, 6 failed)
 #   N = artifacts-HFS-DATA/boot.img        HFS root, probe with a __DATA segment
 #   S = artifacts-SIZE256/boot.img         421 MB boot.img, capacity test only (no userland experiment)
+#   V = artifacts-NATIVEUFS-START/boot.img HFS root, NativeUfs start hook + its read-only root check
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -53,6 +54,7 @@ $images = @{
     M = 'C:\Users\Jason Wu\dsh\artifacts-HFS-OPEN\boot.img'
     N = 'C:\Users\Jason Wu\dsh\artifacts-HFS-DATA\boot.img'
     S = 'C:\Users\Jason Wu\dsh\artifacts-SIZE256\boot.img'
+    V = 'C:\Users\Jason Wu\dsh\artifacts-NATIVEUFS-START\boot.img'
 }
 
 $path = $images[$Image]

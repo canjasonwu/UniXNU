@@ -114,8 +114,45 @@ python3 devices/fuxi/scripts/root-manifest.py verify --image /tmp/userdata-root.
 自检内容：正常构建+校验、**篡改载荷被拒**（sha256 不符）、**篡改清单被拒**（清单哈希不符）。
 实测：用 64 MiB 的 HFS 卷作为 `OS` 窗口生成 67,112,960 字节镜像并通过校验。
 
-### 6.5 下一步
+### 6.5 内核侧启动钩子：已实现（2026-10-31）
 
-1. 内核侧：扩展 `fuxi_ufs_inspect()`（已有，只读寄存器 + 分阶段 panic）为"启动 host → 读清单 → 分窗读入 RAM → 校验 sha256"，每步都用 panic 文字报告阶段；
-2. 读通后把 RAM 缓冲接到现有 RAM-root 路径（替换 payload 里的 data ramdisk）；
-3. 需要上机时：`fastboot flash userdata /tmp/userdata-root.img`（用户数据可丢，`fastboot erase userdata` 即恢复）。
+驱动本身是按 kext personality（`IOProviderClass`）匹配的 IOService，而我们把驱动直接链进内核，
+没有 personality 注册表。最小改动是在驱动文件里追加一个 C 入口（复用驱动全部代码）：
+
+```c
+extern "C" int native_ufs_probe_start(void);   /* 由 devices/fuxi/scripts/nativeufs-start-hook.py 追加 */
+```
+
+它的动作：在 `gIOServicePlane` 里递归找 **`IOPlatformExpertDevice`** → `new NativeUfs` → `init` →
+`attach(provider)` → `start(provider)`；返回 `1` 启动成功、`0` 驱动拒绝（自身会打日志）、负数表示阶段失败。
+
+内核侧（`ShengPlatformPower.cpp` 的晚期探针）**不使用弱符号**（Mach-O 内核链接不允许未定义弱符号），
+而是让驱动归档自己注册函数指针：
+
+- `ShengPlatformPower.cpp` 定义 `void (*fuxi_ufs_start_hook)(void) = NULL;`
+- `NativeUfsStartHook.cpp`（只编进 NativeUfs 归档）用 **static constructor** 把真实钩子装进这个指针
+- 因此 `CONFIG_XNU_NATIVE_UFS=n` 时指针恒为 NULL，内核正常链接
+
+调用条件：boot arg `fuxi-ufs-start=1`；驱动行为由 `native-ufs-probe` 决定，`=10` 是它自带的**只读检查**
+（LUN0 GPT → `userdata` → 首块清单 → panic 打印 `userdata first/last`、块 0 魔数、`manifest status`、`windows`）。
+
+**镜像 V2**（最新，已构建）：
+`artifacts-NATIVEUFS-START/boot.img = ed626a572459fa1d0213d44c43881301e3eaa328cc8c2c76148f1518f469af96`
+（kernel 51,560,448 字节，含 NativeUfs 与注册钩子；内核参数 `native-ufs-probe=10 fuxi-ufs-start=1`）
+
+判读：
+
+| 屏幕 | 含义 |
+|---|---|
+| `fuxi-ufs-start: hook=1` + 驱动的 `NATIVE_UFS root check …` | ✅ 驱动起来了，并读到了 GPT/清单（下一步接 RAM-root） |
+| `fuxi-ufs-start: hook=0` | 驱动拒绝启动（`start` 返回 false，通常 provider 类型不符） |
+| `fuxi-ufs-start: hook=-1/-2` | 找不到注册表根 / 找不到 `IOPlatformExpertDevice` |
+| `fuxi-ufs-start: hook=-4/-5` | `init` / `attach` 失败 |
+| `fuxi-ufs-start: driver not linked` | 镜像不是 `NATIVE_UFS=y` 构建 |
+| 驱动自己的 `bring-up failed: <why>` | 硬件初始化失败（why 指出阶段） |
+
+### 6.6 下一步
+
+1. 若镜像 V 显示 `hook=1` 且驱动读到清单：把"分窗读入 RAM + sha256 校验"接到 RAM-root；
+2. 若 hook<0：把 provider 搜索换成 `IORegistryEntry::fromPath("/device-tree", gIODTPlane)` 等备选路径；
+3. 若 `bring-up failed`：按 `why` 补 ADT 属性（`ufshc` 节点目前**没有 `reg`**，可能需要补 `reg`/`interrupts`）。

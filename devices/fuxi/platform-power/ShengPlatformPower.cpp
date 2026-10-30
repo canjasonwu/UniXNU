@@ -190,11 +190,34 @@ fuxi_ufs_inspect(void)
 
 
 
+/* NativeUfs is written as an IOService matched from a kext personality. This kernel links the driver
+ * into the image and has no personality registry for it, so the driver's own file carries a C hook
+ * (devices/fuxi/scripts/nativeufs-start-hook.py) that allocates, attaches and starts it against the
+ * platform expert device. The symbol only exists when the driver is linked, hence the weak reference.
+ * Gated by the boot argument fuxi-ufs-start so ordinary images never touch the controller this way. */
+/* The NativeUfs archive installs the real hook through a static constructor when the driver is
+ * linked in (devices/fuxi/NativeUfsStartHook.cpp). Without the driver this stays null. */
+extern "C" void (*fuxi_ufs_start_hook)(void) = NULL;
+
+extern "C" void
+fuxi_ufs_start(void)
+{
+	uint32_t enabled = 0;
+	if (!PE_parse_boot_argn("fuxi-ufs-start", &enabled, sizeof(enabled)) || enabled == 0) {
+		return;
+	}
+	if (fuxi_ufs_start_hook == NULL) {
+		panic("fuxi-ufs-start: driver not linked");
+	}
+	fuxi_ufs_start_hook();
+}
+
 extern "C" void
 sheng_pmgr_late_probe(void)
 {
 	sheng_pmgr_publish_nub();
 	fuxi_ufs_inspect();
+	fuxi_ufs_start();
 }
 
 extern "C" void

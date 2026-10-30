@@ -70,6 +70,13 @@ subprocess.run([clang, '-target', 'arm64-apple-ios17.0', '-ffreestanding', '-fno
                 '-o', str(stub_object)], check=True, env=environment)
 print('compiled stubs:', stub_object, stub_object.stat().st_size, 'bytes')
 
+hook_source = Path('/root/UniXNU/devices/fuxi/NativeUfsStartHook.cpp')
+hook_object = OUT / 'NativeUfsStartHook.o'
+subprocess.run([clang, '-target', 'arm64-apple-ios17.0', '-ffreestanding', '-fno-builtin',
+                '-fno-stack-protector', '-fno-pic', '-Oz', '-c', str(hook_source),
+                '-o', str(hook_object)], check=True, env=environment)
+print('compiled hook:', hook_object, hook_object.stat().st_size, 'bytes')
+
 # The kernel link expects the archive under the build tree (build-xnu-4k-baseline.sh:
 # UFS_ARCHIVE=$ROOT/build/native-ufs/libNativeUfs.a), not next to the reference sources.
 archive_dir = Path('/root/UniXNU/build/native-ufs')
@@ -77,7 +84,7 @@ archive_dir.mkdir(parents=True, exist_ok=True)
 archive = archive_dir / 'libNativeUfs.a'
 archive.unlink(missing_ok=True)
 subprocess.run(['/opt/unixnu-linux/CommandLineTools/usr/bin/ar', 'rcs', str(archive),
-                str(destination), str(stub_object)], check=True)
+                str(destination), str(stub_object), str(hook_object)], check=True)
 print('archive:', archive, archive.stat().st_size, 'bytes')
 
 # Mirror it where the kernel script looks for it ($ROOT/build/native-ufs).
