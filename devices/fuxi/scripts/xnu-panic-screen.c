@@ -222,6 +222,17 @@ __attribute__((noreturn, used, section(".text.b_main"))) void panic_screen_main 
   u32 row, col;
 
   __asm__ volatile ("msr daifset, #15");
+#if defined(VINFO_FALLBACK) && VINFO_FALLBACK
+  /* The board observer fills VINFO only when it binds a display; when it never binds, VINFO is
+   * all zero and this code would park without drawing anything. Fall back to the video console's
+   * own vinfo, which the console keeps valid from the moment it maps the frame buffer. */
+  if (v->v_baseaddr == 0 || v->v_depth != 32) {
+    volatile struct vc_info *alt = (volatile struct vc_info *)VINFO_FALLBACK;
+    if (alt->v_baseaddr != 0 && alt->v_depth == 32) {
+      v = alt;
+    }
+  }
+#endif
   g.base = (u8 *)v->v_baseaddr;
   g.rb   = v->v_rowbytes;
   g.w    = v->v_width;

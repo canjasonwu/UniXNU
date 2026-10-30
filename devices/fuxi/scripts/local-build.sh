@@ -95,8 +95,8 @@ if [ "$DO_PAYLOAD" != 0 ] || ! have out/fuxi/payload/payload.img; then
     # Isolation build: HFS is in the kernel, but the data ramdisk is the Mach-O init that
   # already booted, so a hang here means HFS registration itself is the problem rather
   # than the HFS mount path.
-  # The data ramdisk is a real HFS+ volume holding a non-exiting /sbin/launchd probe, so
-  # HFS is the root filesystem and PID 1 runs from it without ever triggering the panic path.
+  # HFS root with a non-exiting probe init: the probe opens /hello.txt and then spins, so a
+  # clean run shows marks 48/49, and a user fault now panics with esr/far/pc on screen.
   cp /root/fuxi-root/root.hfs out/fuxi/data-ramdisk.img
   python3 ./unixnu build payload --uefi uefi-fuxi --unique-chip-id "$CHIP_ID" \
     --data-ramdisk out/fuxi/data-ramdisk.img > payload.log 2>&1

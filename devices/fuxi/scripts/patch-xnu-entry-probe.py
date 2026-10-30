@@ -44,6 +44,7 @@ MMU_ENABLE_VA = 0xFFFFFFF00B9D2330   # msr SCTLR_EL1, x0
 AFTER_MMU_VA = 0xFFFFFFF00B9D2350    # mov x0, #0x300000
 PANIC_VA = 0xFFFFFFF00BF69B04      # _panic
 VINFO_VA = 0xFFFFFFF00C0A2970      # _vinfo
+VINFO_FALLBACK_VA = 0                  # video console vinfo, used when the observer is unbound
 PANIC_CAVE_END = 0xFFFFFFF00B9D0FF0
 CAVE_SIZE = 0x60
 CAVES = {1: 0xFFFFFFF00B9D0500, 2: 0xFFFFFFF00B9D0560, 3: 0xFFFFFFF00B9D05C0, 4: 0xFFFFFFF00B9D0620}
@@ -208,6 +209,7 @@ def assemble_c(source, va, workdir, symbols):
         definitions.append(f'-DPANIC_TEXT={text:#x}UL')
     subprocess.run([clang, '--target=aarch64-none-elf', '-ffreestanding', '-fno-builtin', '-fno-stack-protector',
                     '-mgeneral-regs-only', '-fno-pic', '-mcmodel=tiny', '-Oz', f'-DVINFO={VINFO_VA:#x}UL',
+                    f'-DVINFO_FALLBACK={VINFO_FALLBACK_VA:#x}UL',
                     *definitions, f'-I{font_dir}', '-c', source, '-o', obj], check=True)
     script = workdir / 'panic.ld'
     script.write_text('SECTIONS { . = %#x; .text : { *(.text.a_entry) *(.text.a_common) *(.text*) *(.rodata*) } /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) *(.ARM.*) } }\n' % va)
@@ -295,7 +297,7 @@ def rebase(kernel, data):
     _panic and _vinfo come from the symbol table when the kernel has one (the plain source
     kernel does); the retained candidate layout is the unshifted case.
     """
-    global ENTRY_VA, START_FIRST_CPU, MMU_ENABLE_VA, AFTER_MMU_VA, PANIC_VA, VINFO_VA, PANIC_CAVE_END, CAVES
+    global ENTRY_VA, START_FIRST_CPU, MMU_ENABLE_VA, AFTER_MMU_VA, PANIC_VA, VINFO_VA, VINFO_FALLBACK_VA, PANIC_CAVE_END, CAVES
     delta = unixthread_pc(data) - ENTRY_VA
     if delta:
         ENTRY_VA += delta
@@ -334,6 +336,10 @@ def rebase(kernel, data):
         # mappings, then pin it to their retained GOP mapping. Ordinary source
         # kernels without the observer retain the original vinfo path.
         VINFO_VA = names.get('_boot_progress_panic_vinfo', names['_vinfo'])
+        # The boot-progress observer only fills its panic vinfo when it binds a display.
+        # When it never binds, the blob would park with no text, so keep the video
+        # console's own vinfo as a fallback and let the blob choose at run time.
+        VINFO_FALLBACK_VA = names.get('_vinfo', 0)
     return names
 
 
@@ -351,7 +357,15 @@ def find_cave(data, need, anchors):
     differ between builds (a component change moves code into sheng's old padding),
     so the range is discovered instead of being assumed.
     """
-    for name, vmaddr, vmsize, fileoff, filesize in EXEC_SEGMENTS:
+    # Order matters. __TEXT on this kernel has initprot 1: the loader maps it read-only and
+    # NOT executable, so code placed there faults with an instruction permission fault once the
+    # MMU is on (that is exactly what the panic screen hit). __TEXT_EXEC (initprot 5) is the
+    # executable segment; the pre-MMU entry probes run fine in either. Search the executable
+    # segment first and only fall back to __TEXT as a last resort.
+    ordered = sorted(EXEC_SEGMENTS,
+                     key=lambda seg: (0 if seg[0] == '__TEXT_EXEC' else
+                                      1 if seg[0] == '__PLK_TEXT_EXEC' else 2))
+    for name, vmaddr, vmsize, fileoff, filesize in ordered:
         if name not in ('__TEXT', '__TEXT_EXEC', '__PLK_TEXT_EXEC'):
             continue
         blob = data[fileoff:fileoff + filesize]

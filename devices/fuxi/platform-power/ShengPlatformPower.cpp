@@ -320,3 +320,30 @@ fuxi_trace_abort(unsigned esr)
 	fuxi_status = 9;
 	fuxi_draw();
 }
+
+extern "C" void
+fuxi_trace_page(unsigned page)
+{
+	/* Show the faulting kernel PC as a page index from the kernel __TEXT base:
+	 * white = page/100, cyan = page%100, yellow = 1 (this is a PC report). */
+	fuxi_stage = (page / 100u) % 100u;
+	fuxi_signal = page % 100u;
+	fuxi_status = 1;
+	fuxi_draw();
+}
+
+extern "C" void
+fuxi_exec_header_panic(unsigned magic, unsigned ncmds, unsigned sizeofcmds,
+    long long macho_size, const uint32_t *cmd)
+{
+	panic("fuxi-exec: size=%llu magic=%x ncmds=%u cmds=%x cmd0=%x cs0=%x cmd1=%x cs1=%x",
+	    (unsigned long long)macho_size, magic, ncmds, sizeofcmds, cmd[0], cmd[1], cmd[2], cmd[3]);
+}
+
+extern "C" void
+fuxi_decrypt_panic(unsigned cmd, unsigned cmdsize, unsigned cryptid, unsigned cryptoff,
+    unsigned cryptsize, unsigned offset)
+{
+	panic("fuxi-decrypt: cmd=%x cmdsize=%x id=%x off=%x size=%x at=%x",
+	    cmd, cmdsize, cryptid, cryptoff, cryptsize, offset);
+}
