@@ -21,6 +21,7 @@
 | A | `artifacts-SIGBUS/boot.img` | `3ff5efdff5534600e3cb14dcfd126753f512038e5632a2f6de012b6f46122cde` | HFS+ 卷（探针：getpid → open("/hello.txt") → write → 空转） | **主实验**：抓 SIGBUS 来源 |
 | B | `artifacts-SIGBUS-CONTROL/boot.img` | `e305ac6622458b7bdd3e2f0c9a372fb6d4ac597e0786ef186932a98188489eb5` | mockfs（普通 Mach-O init，退出码 1） | **对照**：同一内核、无 HFS，验证 panic 屏与用户态 exec 正常 |
 | C | `artifacts-HFS-NAKED/boot.img` | `9c166363127ce1bcbd59ccd87f63205a760e6e15fc44183c0ac7f573c908e963` | HFS+ 卷（探针：**无栈**裸汇编，`mov x0,#7; mov x16,#1; svc #0x80` 后空转） | **栈假设实验**：完全不碰用户栈 |
+| D | `artifacts-LOADINFO/boot.img` | `a16cfc7557338994a2baaec0020cd17d6b6ff164e664cd3bbdc6487195a06160` | HFS+ 卷（无栈探针） | **加载结果**：exec 成功瞬间由内核打印 entry / 初始 SP / 栈大小 |
 
 ## 判读表
 
@@ -32,6 +33,22 @@
 | `fuxi-iabort-el0: esr=… far=… pc=…` | 用户态**取指**故障 | 若 pc ≈ 程序入口，说明代码页没有执行权限或没映射 |
 | `fuxi-sigbus: caller=… pid=…` | SIGBUS 是**内核主动投递**的 | caller 地址可反查函数（把地址发我，我用 payload 内核符号表解析） |
 | 只有三个数字（无 panic） | init 在正常空转 | ✅ 用户态跑起来了，SIGBUS 问题消失 |
+
+### 镜像 D（exec 加载结果，HFS 根）
+
+屏幕会直接出现一行（不依赖任何用户态故障）：
+
+```
+fuxi-load: entry=… sp=… stack=… size=…
+```
+
+判读：
+
+| 现象 | 结论 |
+|---|---|
+| `entry` ≈ `100000xxx`，`sp` 在 `100004000` 以上、`size` 合理（如 `800000`） | exec 结果正常；若 A/C 仍 SIGBUS，则应查线程初始状态/异常投递 |
+| `sp` 为 0 或与 `entry` 重叠/落在镜像内 | **初始栈设置错误**——这就是 SIGBUS 的直接原因 |
+| `size` 为 0 或异常 | 栈大小未设置 |
 
 ### 镜像 C（无栈探针，HFS 根）
 
@@ -55,6 +72,7 @@
 pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image A
 pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image B
 pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image C
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image D
 ```
 
 脚本只做 `fastboot boot`（不写存储、不擦除），会先等设备进 fastboot。

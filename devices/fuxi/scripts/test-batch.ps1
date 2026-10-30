@@ -9,13 +9,14 @@
 # -Image letters:
 #   A = artifacts-SIGBUS/boot.img          HFS root, EL0 abort + SIGBUS probes
 #   B = artifacts-SIGBUS-CONTROL/boot.img  mockfs root, control
-#   C = artifacts-HFS-NAKED/boot.img       HFS root, probe without any stack use (when built)
+#   C = artifacts-HFS-NAKED/boot.img       HFS root, probe without any stack use
+#   D = artifacts-LOADINFO/boot.img        HFS root, kernel prints entry/sp/stack after exec
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C')]
+    [ValidateSet('A', 'B', 'C', 'D')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -31,6 +32,7 @@ $images = @{
     A = 'C:\Users\Jason Wu\dsh\artifacts-SIGBUS\boot.img'
     B = 'C:\Users\Jason Wu\dsh\artifacts-SIGBUS-CONTROL\boot.img'
     C = 'C:\Users\Jason Wu\dsh\artifacts-HFS-NAKED\boot.img'
+    D = 'C:\Users\Jason Wu\dsh\artifacts-LOADINFO\boot.img'
 }
 
 $path = $images[$Image]

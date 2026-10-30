@@ -347,3 +347,10 @@ fuxi_decrypt_panic(unsigned cmd, unsigned cmdsize, unsigned cryptid, unsigned cr
 	panic("fuxi-decrypt: cmd=%x cmdsize=%x id=%x off=%x size=%x at=%x",
 	    cmd, cmdsize, cryptid, cryptoff, cryptsize, offset);
 }
+
+extern "C" void
+fuxi_load_panic(unsigned long long entry, unsigned long long sp, unsigned long long stack,
+    unsigned long long size)
+{
+	panic("fuxi-load: entry=%llx sp=%llx stack=%llx size=%llx", entry, sp, stack, size);
+}
