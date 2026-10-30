@@ -207,7 +207,50 @@ fuxi-ufs-start: hook=<结果> clock_powered=<0|1> clock_written=<N>
 | `hook=-2` | 找不到 `IOPlatformExpertDevice` | 改 provider 搜索路径 |
 | `clock enable failed (GCC map)` | GCC 窗口映射失败 | 检查物理内存描述符 |
 
-### 6.9 下一步
+### 6.10 RAM-root 接线原型：自己注册 md 设备并切换 rootdev（2026-10-31）
+
+关键 API（Apple 自己的 `IOFindBSDRoot` 就用它把 ADT RAMDisk 变成 `/dev/md0`）：
+
+```c
+dev_t mdevadd(int devid, uint64_t base_sectors, unsigned int size_sectors, int phys);
+dev_t mdevlookup(int devid);
+```
+
+`bsd/dev/memdev.c` 已无条件编译进内核（`mdevadd`/`mdevlookup` 都在内核符号里）。
+
+接法（已实现原型）：
+
+1. 晚期探针（`sheng_pmgr_late_probe`，在 `bsd_autoconf` 内、`setconf()` **之前**）：
+   - `fuxi_mdev_test()`：读 `/chosen/memory-map` 的 `RAMDisk` 属性（virt, size）→
+     `mdevadd(-1, base>>12, size>>12, 0)` 注册成新的 md 设备并记住设备号
+2. `setconf()`（`bsd_init.c`，`IOFindBSDRoot` 之后）新增一行：
+   `rootdev = fuxi_rootdev_override(rootdev);`
+   → 若已注册 md 设备则**静默**返回它，`vfs_mountroot` 就会从这块 RAM 设备挂根
+
+两种模式（boot arg `fuxi-mdev-test`）：
+
+| 值 | 行为 |
+|---|---|
+| `1` | 注册后立即 panic，屏幕显示 `fuxi-mdev-test: registered md dev 0x.. base=.. bytes=..` |
+| `2` | 静默注册并切换 rootdev，让启动继续 → 用来验证"从自己注册的 md 挂根" |
+
+**镜像**：
+
+- `artifacts-MDEV/boot.img = d98141a704445c6d1612af3aeb2a45a707fd8ecbafba834b6b305fb097230bee`（`=2` 挂载测试）
+- `artifacts-MDEV-REPORT/boot.img = 4d8f7163c63092183e84095277b7686578ec327cfde6ed4b7a485c487c507cc2`（`=1` 报告）
+
+判读：
+
+| 屏幕（Y） | 含义 |
+|---|---|
+| 与基线相同（`initproc failed to start …`） | ✅ 根确实从我们注册的 md 设备挂载并跑到了 init |
+| `fuxi-mdev-test: /chosen/memory-map missing` 或 `RAMDisk property missing` | ADT 里没有该节点，需换数据来源 |
+| `mdevadd failed (-1)` | 设备槽/重叠等问题（重叠会 panic 并打印区间） |
+| 屏幕（Y1） | 显示注册到的 `md dev/base/bytes`，确认注册成功 |
+
+> 这一步**不碰 UFS 硬件**：数据仍来自 payload 的 RAMDisk，只是把"注册 md + 切根"这条 M2 必需的机制先用现有内容验证通。
+
+### 6.11 下一步
 
 1. 若镜像 V 显示 `hook=1` 且驱动读到清单：把"分窗读入 RAM + sha256 校验"接到 RAM-root；
 2. 若 hook<0：把 provider 搜索换成 `IORegistryEntry::fromPath("/device-tree", gIODTPlane)` 等备选路径；

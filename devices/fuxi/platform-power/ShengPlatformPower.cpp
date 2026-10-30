@@ -333,12 +333,19 @@ fuxi_ufs_start(void)
 	    result, (unsigned)fuxi_ufs_clock_powered, fuxi_ufs_clock_written);
 }
 
+/* Defined further down; declared here because the late probe calls them. */
+extern "C" void fuxi_mdev_test(void);
+extern "C" int fuxi_rootdev_override(int current);
+extern "C" void fuxi_ufs_clock(void);
+extern "C" void fuxi_ufs_start(void);
+
 extern "C" void
 sheng_pmgr_late_probe(void)
 {
 	sheng_pmgr_publish_nub();
 	fuxi_ufs_inspect();
 	fuxi_ufs_clock();
+	fuxi_mdev_test();
 	fuxi_ufs_start();
 }
 
@@ -512,4 +519,69 @@ extern "C" void
 fuxi_load_bad(unsigned long long entry, unsigned long long sp, unsigned long long size)
 {
 	panic("fuxi-load-bad: entry=%llx sp=%llx size=%llx", entry, sp, size);
+}
+
+/*
+ * RAM root wiring (M2 prototype).
+ *
+ * Apple's IOFindBSDRoot turns the ADT RAMDisk into /dev/md0 through mdevadd(). The same call lets any
+ * wired RAM buffer become an md device, which is the plan for a root image read from userdata.
+ *
+ * fuxi_mdev_register() registers such a buffer and remembers the device number.
+ * fuxi_rootdev_override() returns that device instead of the discovered root, so vfs_mountroot mounts
+ * the registered buffer. It is a no-op unless the buffer was registered.
+ *
+ * fuxi_mdev_test() exercises the whole path without any hardware access: with the boot argument
+ * fuxi-mdev-test=1 it takes the RAMDisk the loader already placed in /chosen/memory-map, registers it
+ * as a second md device and lets the override switch the root to it. Content is identical to md0, so a
+ * successful boot proves the register-then-override mechanism works.
+ */
+extern "C" int mdevadd(int devid, uint64_t base, unsigned int size, int phys);
+extern const IORegistryPlane *gIODTPlane;
+
+static int fuxi_md_dev = -1;
+
+extern "C" int
+fuxi_rootdev_override(int current)
+{
+	/* Silent on purpose: the interesting evidence is whether the boot then mounts and runs from the
+	 * registered device. fuxi-mdev-test=1 reports the registration itself and stops there. */
+	if (fuxi_md_dev >= 0) {
+		return fuxi_md_dev;
+	}
+	return current;
+}
+
+extern "C" void
+fuxi_mdev_test(void)
+{
+	uint32_t enabled = 0;
+	if (!PE_parse_boot_argn("fuxi-mdev-test", &enabled, sizeof(enabled)) || enabled == 0) {
+		return;
+	}
+
+	IORegistryEntry *map = IORegistryEntry::fromPath("/chosen/memory-map", gIODTPlane);
+	if (map == NULL) {
+		panic("fuxi-mdev-test: /chosen/memory-map missing");
+	}
+	OSData *data = OSDynamicCast(OSData, map->getProperty("RAMDisk"));
+	if (data == NULL || data->getLength() < 2 * sizeof(uintptr_t)) {
+		panic("fuxi-mdev-test: RAMDisk property missing or short");
+	}
+	const uintptr_t *params = (const uintptr_t *)data->getBytesNoCopy();
+	uint64_t base = params[0];
+	uint64_t bytes = params[1];
+	map->release();
+
+	int dev = mdevadd(-1, base >> 12, (unsigned int)(bytes >> 12), 0);
+	if (dev < 0) {
+		panic("fuxi-mdev-test: mdevadd failed (%d) base=%llx bytes=%llx", dev,
+		    (unsigned long long)base, (unsigned long long)bytes);
+	}
+	fuxi_md_dev = dev;
+	if (enabled == 1) {
+		/* Report-only mode: stop before mountroot so the values are visible on screen. */
+		panic("fuxi-mdev-test: registered md dev 0x%x base=%llx bytes=%llx", (unsigned)dev,
+		    (unsigned long long)base, (unsigned long long)bytes);
+	}
 }

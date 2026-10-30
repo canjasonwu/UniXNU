@@ -24,12 +24,14 @@
 #   V = artifacts-NATIVEUFS-START/boot.img HFS root, NativeUfs start hook + its read-only root check
 #   W = artifacts-UFS-CLOCK/boot.img       UFS clock-branch enable probe (no driver)
 #   X = artifacts-UFS-X/boot.img           UFS clock enable + NativeUfs start + its read-only check
+#   Y = artifacts-MDEV/boot.img            registers the RAMDisk as a second md and switches root to it
+#   Z = artifacts-MDEV-REPORT/boot.img     same as Y but panics with the registered device numbers
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -59,6 +61,8 @@ $images = @{
     V = 'C:\Users\Jason Wu\dsh\artifacts-NATIVEUFS-START\boot.img'
     W = 'C:\Users\Jason Wu\dsh\artifacts-UFS-CLOCK\boot.img'
     X = 'C:\Users\Jason Wu\dsh\artifacts-UFS-X\boot.img'
+    Y = 'C:\Users\Jason Wu\dsh\artifacts-MDEV\boot.img'
+    Z = 'C:\Users\Jason Wu\dsh\artifacts-MDEV-REPORT\boot.img'
 }
 
 $path = $images[$Image]
