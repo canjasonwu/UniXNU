@@ -13,6 +13,7 @@ doing the work:
 The guest mounts the ISO, mounts the HFS+ volume, copies the tree, syncs, lists it (so the serial
 log is the evidence), unmounts and powers off. Nothing is downloaded at runtime.
 """
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -37,16 +38,28 @@ write_files:
     content: |
       #!/bin/bash
       set -x
-      modprobe hfsplus || true
+      export DEBIAN_FRONTEND=noninteractive
+      # The module package's postinst regenerates the initramfs, which takes tens of minutes under
+      # emulation; disabling that hook makes the install quick and still runs depmod.
+      chmod -x /etc/kernel/postinst.d/initramfs-tools 2>/dev/null || true
+      if ! modprobe hfsplus 2>/dev/null; then
+        apt-get update -qq || true
+        apt-get install -y -qq "linux-modules-extra-$(uname -r)" || echo "MODULES INSTALL FAILED"
+        modprobe hfsplus || echo "MODPROBE FAILED"
+      fi
+      grep hfsplus /proc/filesystems || true
       grep hfsplus /proc/filesystems || true
       mkdir -p /mnt/xfer /mnt/root
-      mount -o ro /dev/vdb /mnt/xfer || { echo "XFER MOUNT FAILED"; poweroff -f; }
-      mount -t hfsplus /dev/vdc /mnt/root || { echo "HFS MOUNT FAILED"; poweroff -f; }
+      mount -o ro /dev/vdc /mnt/xfer || { echo "XFER MOUNT FAILED"; poweroff -f; }
+      mount -t hfsplus /dev/vdd /mnt/root || { echo "HFS MOUNT FAILED"; poweroff -f; }
       cp -a /mnt/xfer/. /mnt/root/ || { echo "COPY FAILED"; poweroff -f; }
       sync
       echo "=== HFS CONTENT ==="
       find /mnt/root -maxdepth 3 | head -50
       ls -l /mnt/root/sbin 2>/dev/null
+      echo "=== HASH CHECK ==="
+      sha256sum /mnt/root/sbin/launchd || echo "HASH FAILED"
+      wc -c /mnt/root/sbin/launchd
       umount /mnt/root || echo "UMOUNT ROOT FAILED"
       umount /mnt/xfer || true
       echo "POPULATE DONE"
@@ -70,16 +83,40 @@ def make_hfs(size_mib=64):
     print('hfs image created:', HFS_DISK.stat().st_size, 'bytes')
 
 
+
+# A prepared init binary (for example a real launchd from an iOS root image) can replace the probe:
+#   python3 populate-hfs.py --launchd /path/to/launchd
+# --dry-run builds the transfer ISO and stops before QEMU, which makes the plumbing testable without
+# starting a guest.
+LAUNCHD_OVERRIDE = None
+DRY_RUN = False
+_argv = sys.argv[1:]
+_idx = 0
+while _idx < len(_argv):
+    if _argv[_idx] == '--launchd' and _idx + 1 < len(_argv):
+        LAUNCHD_OVERRIDE = Path(_argv[_idx + 1])
+        _idx += 2
+        continue
+    if _argv[_idx] == '--dry-run':
+        DRY_RUN = True
+    _idx += 1
+
+
 def make_transfer():
     CODE_DIR.mkdir(parents=True, exist_ok=True)
     launchd = CODE_DIR / 'sbin' / 'launchd'
     launchd.parent.mkdir(parents=True, exist_ok=True)
-    if not launchd.is_file():
+    if LAUNCHD_OVERRIDE is not None:
+        if not LAUNCHD_OVERRIDE.is_file():
+            raise SystemExit(f'launchd override not found: {LAUNCHD_OVERRIDE}')
+        shutil.copy2(LAUNCHD_OVERRIDE, launchd)
+        print('launchd override installed:', launchd, launchd.stat().st_size, 'bytes')
+    elif True:  # always rebuild: the probe source changes between rounds
         subprocess.run([
             '/opt/unixnu-linux/CommandLineTools/usr/bin/clang', '-target', 'arm64-apple-ios17.0',
             '-nostdlib', '-static', '--ld-path=/opt/unixnu-linux/CommandLineTools/usr/bin/ld',
             '-Wl,-e,__start', '-o', str(launchd),
-            '/root/UniXNU/devices/fuxi/experiments/init-a.c'], check=True)
+            '/root/UniXNU/devices/fuxi/experiments/init-hfs-open.c'], check=True)
     (CODE_DIR / 'hello.txt').write_text('fuxi HFS root\n')
     subprocess.run(['genisoimage', '-quiet', '-o', str(XFER), '-R', '-J', str(CODE_DIR)], check=True)
     print('transfer ISO:', XFER.stat().st_size, 'bytes')
@@ -88,7 +125,7 @@ def make_transfer():
 def make_seed():
     seed_dir = WORK / 'seed'
     seed_dir.mkdir(exist_ok=True)
-    (seed_dir / 'meta-data').write_text('instance-id: fuxi-hfs-populate\nlocal-hostname: hfs-pop\n')
+    (seed_dir / 'meta-data').write_text('instance-id: fuxi-hfs-populate-14\nlocal-hostname: hfs-pop\n')
     (seed_dir / 'user-data').write_text(USER_DATA)
     subprocess.run(['genisoimage', '-quiet', '-o', str(SEED), '-V', 'cidata', '-R', '-J',
                     str(seed_dir)], check=True)
@@ -114,7 +151,7 @@ def qemu():
     ]
     print('+', ' '.join(command))
     with SERIAL.open('w') as out:
-        result = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, timeout=1200)
+        result = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, timeout=2700)
     print('qemu exit:', result.returncode)
     text = SERIAL.read_text(errors='replace')
     for line in text.splitlines():
@@ -128,4 +165,8 @@ if __name__ == '__main__':
     make_hfs()
     make_transfer()
     make_seed()
+    if DRY_RUN:
+        print('dry run: transfer ISO and seed built, not starting QEMU')
+        print('xfer:', XFER.stat().st_size, 'bytes')
+        sys.exit(0)
     sys.exit(qemu())

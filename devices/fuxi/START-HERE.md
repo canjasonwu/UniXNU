@@ -32,7 +32,7 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image K
 |---|---|---|---|
 | **K** | `56190f40` | HFS + `getpid+exit(1)` | **先测**：一句话判定"用户态是否执行过" |
 | **J** | `ad979cd3` | HFS + 全探针（加载/取指/数据/SIGBUS/vm_fault） | 单镜像全诊断 |
-| **M** | （构建中） | HFS + 只调 `open("/hello.txt")` | 若 K 显示用户态能跑，用它定位 HFS 读路径 |
+| **M** | `2c2e6930` | HFS + 只调 `open("/hello.txt")`（退出码 5=成功 / 6=失败） | 若 K 显示用户态能跑，用它定位 HFS 读路径 |
 | H | `5dc38a0b` | HFS + 4K 对齐探针 | 页对齐假设 |
 | I | `cd11c48c` | mockfs + 4K 对齐探针 | H 的对照 |
 | F | `636ba13d` | HFS + 无栈探针 + vm_fault 判决 | 栈假设 |

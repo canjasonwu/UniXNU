@@ -21,6 +21,16 @@
 | I | `artifacts-4K-MOCKFS/boot.img` | `cd11c48cc8112f74b6c9c60ec036d5ea131802b73b22f3ef5beb2dc69e6e8909` | mockfs，4K 对齐探针 | H 的对照 |
 | **J** | `artifacts-OMNIDIAG/boot.img` | `ad979cd32ded0e002bed21354ad718f3c855c95a0f5bf277ad325654eb335cd2` | HFS，会写栈的探针，**全部探针** | **单镜像全诊断**（推荐先测） |
 | **K** | `artifacts-HFS-EXIT1/boot.img` | `56190f40199905ef8c51ed7a6dea455ac8165ae6f7109a33df2229d92e4e64b7` | HFS，`getpid+exit(1)` 探针 | **终审**：用户态是否真的执行过 |
+| **M** | `artifacts-HFS-OPEN/boot.img` | `2c2e693036d7422596527da1fbe1189fb2e8ea4f9dd320f759966034da9931b2` | HFS，只调 `open("/hello.txt")`，退出码 5=成功 / 6=失败 | 若 K 显示用户态能跑，用 M 定位 HFS 用户态读路径 |
+
+### 镜像 M 的判读
+
+| 屏幕 | 结论 |
+|---|---|
+| `… (signal 0, exit status 5)` | ✅ 用户态不仅执行，还能**在 HFS 根上打开文件** |
+| `… (signal 0, exit status 6)` | 执行正常，但 HFS 打开失败（查 hfs_vnop_open 路径） |
+| `… (signal 0, exit status 3)` | 执行了，但 getpid() != 1 |
+| 故障探针文字 | 用户态在 open 前后发生故障（按文字定位） |
 
 ### 镜像 K 的判读（最重要的一条）
 
@@ -87,6 +97,19 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image F
 ```powershell
 wsl -d Ubuntu-24.04 -u root -- python3 /root/decode-el0.py "esr=96000045 far=1000000f0 pc=1000004c8"
 ```
+
+## 装入真实 launchd（为下一步准备）
+
+填充脚本现在支持直接放入任意二进制：
+
+```bash
+cd /root/hfs-populate
+python3 populate-hfs.py --launchd /path/to/launchd --dry-run   # 先干跑验证，不启 QEMU
+python3 populate-hfs.py --launchd /path/to/launchd             # 真正填充（约 15-20 分钟）
+```
+
+干跑会打印装入的字节数与 ISO 大小，不会启动 guest；正常填充完成后 guest 会打印
+`HASH CHECK` 里的 sha256，可与源文件对比。
 
 ## 建议顺序
 
