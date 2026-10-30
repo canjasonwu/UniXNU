@@ -5659,6 +5659,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	void *ptr_buffer_start, *ptr_buffer;
 	size_t string_size;
 	size_t string_copy_size;   /* bytes actually copied (reserve may be rounded) */
+	size_t ptr_array_bytes;     /* bytes actually copied from the pointer buffer */
 
 	user_addr_t     string_area;    /* *argv[], *env[] */
 	user_addr_t     ptr_area;       /* argv[], env[], applev[] */
@@ -5734,6 +5735,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	 * one for the NULLs terminating the argv, envv, and apple areas.
 	 */
 	ptr_area_size = (imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 3) * ptr_size;
+	ptr_array_bytes = ptr_area_size;   /* true byte count of the arrays, before any padding */
 	/* fuxi: the argc slot sits ptr_size below the pointer area, and the AArch64 ABI wants the
 	 * resulting sp 16-byte aligned. The strings area is already rounded to 16, so pad the pointer
 	 * area by one pointer when that keeps the total a multiple of 16. */
@@ -5821,7 +5823,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	 * Copy out all our pointer arrays in bulk.
 	 */
 	error = copyout(ptr_buffer_start, ptr_area,
-	    ptr_area_size);
+	    ptr_array_bytes);
 	if (error) {
 		goto bad;
 	}
