@@ -100,3 +100,17 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image P
 - HFS 源码是**外部编译 + force_load**：改 `bsd/sweet_hfs` 后 `local-build.sh` 会自动重建归档
 - 探针必须带对齐入口（`build-probe.py` 会在构建时反汇编自检）
 - `fuxi_trace_mark` 的正式声明是 `void fuxi_trace_mark(int)`，本地不要再写 `extern`
+
+## 8. 第 37–38 轮新增的工具（都已在离线验证过）
+
+| 工具 | 用途 | 验证方式 |
+|---|---|---|
+| `verify-consistency.ps1` | 交叉核对"测试脚本字母映射 / 清单 / 磁盘 / 文档引用哈希" | 实测 `consistency: 329 check(s) ... consistency: ok`，另有 120 个历史目录仅作提示 |
+| `rehearse-intake.sh` | 用**合成根目录**跑通 IPSW 投放全链（检查器 → 投放 dry-run → 打包 → 刷写计划） | 实测最后一行 `rehearsal: ok` |
+| `decode-panic.py`（升级） | 支持**多记录 panic 屏**（一次截图里有多行 panic），逐条符号化与 ESR 解码 | selftest 4 项断言 + 双记录样例 `records: 2` |
+
+回来后的建议顺序（补一条 0.5）：
+
+```powershell
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\verify-consistency.ps1"   # 四者一致性
+```
