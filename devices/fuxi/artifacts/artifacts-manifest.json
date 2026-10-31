@@ -26,8 +26,14 @@
   {
     "Letter": "A5",
     "Bytes": 169619456,
-    "Sha256": "356635cdaac750052aba50605470440b7ceb9141b60f3d50ebb9473c2ac1e6a9",
+    "Sha256": "dc8ad1392315f3a4cbbe7286124ad290714e1590ebd376fd4b43e55292e41d76",
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-COMBINED\\boot.img"
+  },
+  {
+    "Letter": "A6",
+    "Bytes": 169619456,
+    "Sha256": "8e7924b9685ee5ed57b0b9bd3495a6879534ed8393e79f9185573d7217dc5924",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-DATA-OPEN\\boot.img"
   },
   {
     "Letter": "B",

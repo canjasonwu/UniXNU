@@ -38,13 +38,14 @@
 #   K2 = artifacts-EXIT7-ALIGNED/boot.img  minimal getpid+exit(1) probe, aligned entry (K counterpart)
 #   A3 = artifacts-SP-PROBE/boot.img       reports the kernel-computed user SP and its low 4 bits, then stops
 #   A4 = artifacts-SP-FIX/boot.img         kernel aligns the user SP at the source (fix only)
-#   A5 = artifacts-COMBINED/boot.img       ONE boot: mark 56/57 tells whether the old sp was misaligned, and the aligned probe then runs
+#   A5 = artifacts-COMBINED/boot.img       ONE boot: old-sp verdict + aligned exit7 probe (PID 1 runs)
+#   A6 = artifacts-DATA-OPEN/boot.img      same fixed kernel + __DATA and open probe (exit 20/21/22)
 #
 # The script only runs "fastboot boot": it never flashes or erases anything.
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R', 'P', 'L', 'O', 'Q', 'T', 'C2', 'A2', 'K2', 'A3', 'A4', 'A5')]
+    [ValidateSet('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'S', 'V', 'W', 'X', 'Y', 'Z', 'U', 'R', 'P', 'L', 'O', 'Q', 'T', 'C2', 'A2', 'K2', 'A3', 'A4', 'A5', 'A6')]
     [string]$Image,
 
     [int]$WaitSeconds = 240
@@ -89,6 +90,7 @@ $images = @{
     A3 = 'C:\Users\Jason Wu\dsh\artifacts-SP-PROBE\boot.img'
     A4 = 'C:\Users\Jason Wu\dsh\artifacts-SP-FIX\boot.img'
     A5 = 'C:\Users\Jason Wu\dsh\artifacts-COMBINED\boot.img'
+    A6 = 'C:\Users\Jason Wu\dsh\artifacts-DATA-OPEN\boot.img'
 }
 
 $path = $images[$Image]
