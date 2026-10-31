@@ -40,6 +40,10 @@ CONFIG_XNU_OWNER_UNION_SYSTEMOS=n
 CONFIG_XNU_DT_PANIC_REGION=y
 CONFIG_XNU_ZONE_PGZ_ALIGNMENT_PROBE=y
 CONFIG_XNU_NATIVE_ARCH_TIMER=y
+# Privileged Access Never: ARMv8.1+ hardware sets PAN=1 on every EL0->EL1 transition;
+# without this switch copyio.c compiles user_access_enable/disable as no-ops and every
+# copyin/copyout from user memory takes an EL1 permission fault (images A16/A17).
+CONFIG_XNU_NATIVE_PAN=y
 # Boot progress needs the audited UFS/owner-root and Virtio build.
 CONFIG_XNU_BOOT_PROGRESS=n
 

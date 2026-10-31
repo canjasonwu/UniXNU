@@ -454,6 +454,32 @@ fuxi_draw(void)
 extern "C" void
 fuxi_trace_mark(int index)
 {
+	/*
+	 * Loop detector, freeze flavour. A tight loop that keeps re-entering a traced path redraws the
+	 * seven-segment display faster than the panel refreshes, so nothing is readable and no abort is
+	 * recorded. After a generous number of marks (or after the same mark repeats), draw that mark and
+	 * stop the CPU here: the display freezes on the index, which identifies the spinning path.
+	 */
+	{
+		static unsigned long long fuxi_mark_total = 0;
+		static int fuxi_mark_last = -1;
+		static unsigned long long fuxi_mark_repeat = 0;
+		fuxi_mark_total++;
+		if (index == fuxi_mark_last) {
+			fuxi_mark_repeat++;
+		} else {
+			fuxi_mark_last = index;
+			fuxi_mark_repeat = 1;
+		}
+		if (fuxi_mark_total > 4000ull || fuxi_mark_repeat > 200ull) {
+			fuxi_stage = (unsigned)index;
+			fuxi_signal = (unsigned)(fuxi_mark_total & 0x7fu);
+			fuxi_status = (fuxi_mark_repeat > 200ull) ? 1u : 2u;
+			fuxi_draw();
+			for (;;) { __asm__ volatile("yield"); }
+		}
+	}
+
 	fuxi_stage = (unsigned)index;
 	fuxi_draw();
 }
@@ -461,6 +487,23 @@ fuxi_trace_mark(int index)
 extern "C" void
 fuxi_trace_wait(int wait_status)
 {
+	/*
+	 * Same freeze rule for the wait path: fuxi_trace_wait() redraws the display too, so a loop that
+	 * reaps children endlessly flickers without ever calling a mark. Freeze with status=3 and show the
+	 * wait status split across the stage and signal fields.
+	 */
+	{
+		static unsigned long long fuxi_wait_total = 0;
+		fuxi_wait_total++;
+		if (fuxi_wait_total > 4000ull) {
+			fuxi_stage = (unsigned)((wait_status >> 8) & 0xffu);
+			fuxi_signal = (unsigned)(wait_status & 0x7fu);
+			fuxi_status = 3u;
+			fuxi_draw();
+			for (;;) { __asm__ volatile("yield"); }
+		}
+	}
+
 	fuxi_status = ((unsigned)wait_status >> 8) & 0xfu;
 	fuxi_signal = (unsigned)wait_status & 0x7fu;
 	fuxi_draw();
@@ -719,4 +762,46 @@ extern "C" void
 fuxi_sp_note(int low)
 {
 	fuxi_sp_old_low = low;
+}
+
+/*
+ * Last __DATA delta mapping attempt (zero-fill part of a segment). Recorded so the user-fault panic
+ * can say what the loader tried: delta size, mapping result, and the target address.
+ */
+extern "C" unsigned long long fuxi_seg_delta = 0;
+extern "C" unsigned long long fuxi_seg_start = 0;
+extern "C" int fuxi_seg_ret = 0x7fffffff;
+extern "C" int fuxi_seg_count = 0;
+
+extern "C" void
+fuxi_seg_note(unsigned long long delta, unsigned long long start, int ret)
+{
+	fuxi_seg_delta = delta;
+	fuxi_seg_start = start;
+	fuxi_seg_ret = ret;
+	fuxi_seg_count++;
+}
+
+/* EL0 data-abort loop detector (see sleh.c class 0x24). Non-static on purpose: sleh.c links to these. */
+extern "C" unsigned long long fuxi_loop_count = 0;
+extern "C" unsigned long long fuxi_loop_esr = 0;
+extern "C" unsigned long long fuxi_loop_far = 0;
+extern "C" unsigned long long fuxi_loop_pc = 0;
+
+/* OSKext::updateLoadedKextSummaries accounting, captured so the EL1 abort panic can print it. */
+extern "C" unsigned long long fuxi_ks_branch = 0;
+extern "C" unsigned long long fuxi_ks_size = 0;
+extern "C" unsigned long long fuxi_ks_old = 0;
+extern "C" unsigned long long fuxi_ks_prot = 0;
+extern "C" unsigned long long fuxi_ks_dest = 0;
+
+extern "C" void
+fuxi_ks_note(unsigned long long branch, unsigned long long size, unsigned long long old,
+    unsigned long long prot, unsigned long long dest)
+{
+	fuxi_ks_branch = branch;
+	fuxi_ks_size = size;
+	fuxi_ks_old = old;
+	fuxi_ks_prot = prot;
+	fuxi_ks_dest = dest;
 }

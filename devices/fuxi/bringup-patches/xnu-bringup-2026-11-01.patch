@@ -1,0 +1,1134 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index 8bba078..0098e17 100644
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -1,3 +1,6 @@
++extern void fuxi_trace_wait(int wait_status);
++extern void fuxi_trace_mark(int index);
++#include <kern/boot_progress.h>
+ /*
+  * Copyright (c) 2000-2020 Apple Inc. All rights reserved.
+  *
+@@ -183,7 +186,7 @@
+ 
+ #include "kern_exec_internal.h"
+ 
+-#include <CodeSignature/Entitlements.h>
++#include <CoreEntitlements/CoreEntitlements.h>
+ 
+ #include <mach/exclaves.h>
+ 
+@@ -788,6 +791,10 @@ exec_fat_imgact(struct image_params *imgp)
+ 	lret = fatfile_validate_fatarches((vm_offset_t)fat_header, PAGE_SIZE,
+ 	    (off_t)imgp->ip_vattr->va_data_size);
+ 	if (lret != LOAD_SUCCESS) {
++		/* Bring-up: report which load failure this is. Bitmap slot 47 marks the branch,
++		 * the cyan row carries the low nibble of load_return_t. */
++		fuxi_trace_mark(47);
++		fuxi_trace_wait((int)(((unsigned)lret & 0xfu) << 8));
+ 		error = load_return_to_errno(lret);
+ 		goto bad;
+ 	}
+@@ -1343,7 +1350,9 @@ grade:
+ 	/*
+ 	 * Actually load the image file we previously decided to load.
+ 	 */
++	boot_progress_process_stage(proc_getpid(p),p->p_name,"exec load_machfile enter");
+ 	lret = load_machfile(imgp, mach_header, thread, &map, &load_result);
++	boot_progress_process_stage(proc_getpid(p),p->p_name,"exec load_machfile returned");
+ 	if (lret != LOAD_SUCCESS) {
+ 		error = load_return_to_errno(lret);
+ 
+@@ -1818,7 +1827,27 @@ grade:
+ 			}
+ 			goto badtoolate;
+ 		}
+-		/* Set the stack */
++		/* Set the stack.
++		 *
++		 * fuxi: the AArch64 ABI requires sp to be 16-byte aligned whenever C code runs, but
++		 * exec_copyout_strings() derives sp by subtracting string and pointer-array sizes and does
++		 * not round the result. Align it down here (the 8 bytes below the argc slot are unused), so
++		 * a probe whose first instruction is a paired store cannot fault on a misaligned sp.
++		 * fuxi-sp-probe=1 reports the value before the fix and stops, which proves or disproves the
++		 * hypothesis in one boot.
++		 */
++		{
++			uint32_t sp_probe = 0;
++			if ((ap & 0xF) != 0) {
++				fuxi_trace_mark(55);
++			}
++			if (PE_parse_boot_argn("fuxi-sp-probe", &sp_probe, sizeof(sp_probe)) && sp_probe != 0) {
++				panic("fuxi-sp-align: sp=%llx low=%llu entry=%llx",
++				    (unsigned long long)ap, (unsigned long long)(ap & 0xF),
++				    (unsigned long long)load_result.entry_point);
++			}
++			ap = (user_addr_t)((uint64_t)ap & ~(uint64_t)0xF);
++		}
+ 		thread_setuserstack(thread, ap);
+ 	}
+ 
+@@ -5164,6 +5193,7 @@ execve(proc_t p, struct execve_args *uap, int32_t *retval)
+ int
+ __mac_execve(proc_t p, struct __mac_execve_args *uap, int32_t *retval __unused)
+ {
++	fuxi_trace_mark(45);
+ 	struct image_params *imgp = NULL;
+ 	struct vnode_attr *vap = NULL;
+ 	struct vnode_attr *origvap = NULL;
+@@ -5628,6 +5658,10 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
+ 	int     ptr_area_size;
+ 	void *ptr_buffer_start, *ptr_buffer;
+ 	size_t string_size;
++	size_t string_copy_size;   /* bytes actually copied (reserve may be rounded) */
++	size_t ptr_array_bytes;     /* bytes actually copied from the pointer buffer */
++	size_t fuxi_round_delta;   /* bytes added by rounding the strings area */
++	size_t fuxi_ptr_pad;       /* bytes added by padding the pointer area */
+ 
+ 	user_addr_t     string_area;    /* *argv[], *env[] */
+ 	user_addr_t     ptr_area;       /* argv[], env[], applev[] */
+@@ -5691,6 +5725,11 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
+ 
+ 	/* Grow the stack down for the strings we've been building up */
+ 	string_size = imgp->ip_strendp - imgp->ip_strings;
++	string_copy_size = string_size;
++	/* fuxi: keep the argc slot 16-byte aligned (AArch64 ABI) by reserving a rounded
++	 * strings area. Moving sp down instead would leave argc at the wrong address. */
++	string_size = (string_size + 0xF) & ~(size_t)0xF;
++	fuxi_round_delta = string_size - string_copy_size;
+ 	stack -= string_size;
+ 	string_area = stack;
+ 
+@@ -5699,6 +5738,14 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
+ 	 * one for the NULLs terminating the argv, envv, and apple areas.
+ 	 */
+ 	ptr_area_size = (imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 3) * ptr_size;
++	ptr_array_bytes = ptr_area_size;   /* true byte count of the arrays, before any padding */
++	/* fuxi: the argc slot sits ptr_size below the pointer area, and the AArch64 ABI wants the
++	 * resulting sp 16-byte aligned. The strings area is already rounded to 16, so pad the pointer
++	 * area by one pointer when that keeps the total a multiple of 16. */
++	if (((imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 4) * ptr_size) % 16 != 0) {
++		ptr_area_size += 16 - (((imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 4) * ptr_size) % 16);
++	}
++	fuxi_ptr_pad = ptr_area_size - ptr_array_bytes;
+ 	stack -= ptr_area_size;
+ 	ptr_area = stack;
+ 
+@@ -5726,11 +5773,26 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
+ 	/* Return the initial stack address: the location of argc */
+ 	*stackp = stack;
+ 
++	/*
++	 * fuxi: report whether the pre-fix arithmetic would have produced a misaligned sp.
++	 * The fix subtracts a rounded strings area and a padded pointer area, so the value the old code
++	 * would have produced is exactly this stack plus those two deltas.
++	 *   mark 56 = the old code would have handed userland an sp that is not 16-byte aligned
++	 *   mark 57 = the old code would have been aligned too (so the SIGBUS is not from sp)
++	 */
++	{
++		extern void fuxi_trace_mark(int index);
++		extern void fuxi_sp_note(int low);
++		uint64_t old_sp = (uint64_t)stack + (uint64_t)fuxi_round_delta + (uint64_t)fuxi_ptr_pad;
++		fuxi_trace_mark(((old_sp & 0xF) != 0) ? 56 : 57);
++		fuxi_sp_note((int)(old_sp & 0xF));
++	}
++
+ 	/*
+ 	 * Copy out the entire strings area.
+ 	 */
+ 	error = copyout(imgp->ip_strings, string_area,
+-	    string_size);
++		string_copy_size);
+ 	if (error) {
+ 		goto bad;
+ 	}
+@@ -5780,7 +5842,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
+ 	 * Copy out all our pointer arrays in bulk.
+ 	 */
+ 	error = copyout(ptr_buffer_start, ptr_area,
+-	    ptr_area_size);
++	    ptr_array_bytes);
+ 	if (error) {
+ 		goto bad;
+ 	}
+@@ -7013,8 +7075,330 @@ create_unix_stack(vm_map_t map, load_result_t* load_result,
+  *		word width of the kernel. Once the self-exec completes, the
+  *		initproc might be different.
+  */
++#if defined(XNU_OWNER_CACHE_MOUNT) && XNU_OWNER_CACHE_MOUNT
++#if !DEVELOPMENT && !DEBUG
++#error The offline owner cache mount is a development instrument
++#endif
++extern int native_verified_block_volume_device(const char *, dev_t *, char *, size_t);
++#if defined(XNU_OWNER_BOOT_MANIFEST) && XNU_OWNER_BOOT_MANIFEST
++extern int native_owner_publish_boot_manifest(dev_t, const char *, dev_t, const char *);
++#endif
++#if defined(XNU_OWNER_CACHE_STARTUP) && XNU_OWNER_CACHE_STARTUP
++extern void commpage_update_dyld_flags(uint64_t);
++volatile uint64_t native_owner_cache_dyld_flags = 0;
++#endif
++extern int native_verified_block_root_authorized(dev_t);
++volatile int native_owner_cache_stage = 0;
++volatile int native_owner_cache_status = -1;
++volatile int native_owner_cache_mount_status = -1;
++volatile int native_owner_cache_readonly = 0;
++volatile int native_owner_cache_authorized = 0;
++volatile int native_owner_cache_root_recheck = 0;
++volatile uint64_t native_owner_cache_actual_mount_flags = 0;
++volatile uintptr_t native_owner_cache_original_root = 0;
++volatile uintptr_t native_owner_cache_current_root = 0;
++volatile int native_owner_cache_native_union = 0;
++volatile dev_t native_owner_cache_selected_device = NODEV;
++volatile dev_t native_owner_cache_mounted_device = NODEV;
++char native_owner_cache_device_path[64];
++void native_owner_cache_checkpoint(int, int);
++__attribute__((noinline)) void
++native_owner_cache_checkpoint(int status, int authorized)
++{
++	__asm__ volatile("" : : "r"(status), "r"(authorized) : "memory");
++}
++
++static int
++native_owner_cache_prepare(proc_t p, user_addr_t scratch, user_addr_t *envp)
++{
++	const char *volume = "8846FE78-2910-4297-AF97-D59BB6F8FC16";
++#if defined(XNU_OWNER_UNION_SYSTEMOS) && XNU_OWNER_UNION_SYSTEMOS
++#if !CONFIG_UNION_MOUNTS
++#error The owner composition requires the original native union-mount implementation
++#endif
++	const char *mountpoint = "/";
++#else
++	const char *mountpoint = "/private/preboot";
++#endif
++#if !defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS
++	const char *environment = "DYLD_SHARED_CACHE_DIR=/private/preboot/System/Library/Caches/com.apple.dyld";
++#endif
++	vnode_t original_os_root = rootvnode;
++	native_owner_cache_original_root = (uintptr_t)original_os_root;
++	mount_t root_mount = vnode_mount(original_os_root);
++	vnode_t device_vnode = vfs_devvp(root_mount);
++	dev_t root_device = device_vnode ? vnode_specrdev(device_vnode) : NODEV;
++	dev_t selected = NODEV;
++	vnode_t mounted_root = NULLVP;
++	int error = EAUTH, root_authorized = 0, cache_authorized = 0;
++	int32_t result = 0;
++	user64_addr_t spec = scratch + 0x160;
++	char device_path[64] = {0};
++	uint8_t mount_data[0x150] = {0};
++	uint64_t mount_flags = MNT_RDONLY;
++	uint16_t mount_mode = 1;
++	uint32_t anonymous_owner = 99;
++#if !defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS
++#if defined(XNU_OWNER_CRYPTEX_FILES) && XNU_OWNER_CRYPTEX_FILES
++	const char *fallback = "DYLD_FALLBACK_LIBRARY_PATH=/private/preboot/usr/lib";
++	user64_addr_t environment_vector[3] = {scratch + 0x400, scratch + 0x600, USER_ADDR_NULL};
++#else
++	user64_addr_t environment_vector[2] = {scratch + 0x400, USER_ADDR_NULL};
++#endif
++#endif
++	struct mount_args request = {.type = scratch + 0x100, .path = scratch + 0x120,
++	    .flags = MNT_RDONLY, .data = scratch + 0x200};
++	request.flags = (int)mount_flags;
++#if defined(XNU_OWNER_UNION_SYSTEMOS) && XNU_OWNER_UNION_SYSTEMOS
++	request.flags |= MNT_UNION;
++#endif
++	if (device_vnode) vnode_put(device_vnode);
++	root_authorized = (vfs_flags(root_mount) & MNT_RDONLY) && root_device != NODEV &&
++	    native_verified_block_root_authorized(root_device);
++	if (!root_authorized) goto done;
++	native_owner_cache_stage = 1;
++	if (!native_verified_block_volume_device(volume, &selected, device_path,
++	    sizeof(device_path))) goto done;
++	strlcpy(native_owner_cache_device_path, device_path, sizeof(native_owner_cache_device_path));
++	native_owner_cache_selected_device = selected;
++	native_owner_cache_stage = 2;
++	/* Exact user-mount payload already qualified against this original APFS. */
++	memcpy(mount_data, &spec, sizeof(spec));
++	memcpy(mount_data + 8, &mount_flags, sizeof(mount_flags));
++	memcpy(mount_data + 16, &mount_mode, sizeof(mount_mode));
++	memcpy(mount_data + 0x144, &anonymous_owner, sizeof(anonymous_owner));
++	memcpy(mount_data + 0x148, &anonymous_owner, sizeof(anonymous_owner));
++	if ((error = copyout("apfs", request.type, 5)) != 0 ||
++	    (error = copyout(mountpoint, request.path, strlen(mountpoint) + 1)) != 0 ||
++	    (error = copyout(device_path, spec, strlen(device_path) + 1)) != 0 ||
++	    (error = copyout(mount_data, request.data, sizeof(mount_data))) != 0) goto done;
++	native_owner_cache_stage = 3;
++	error = mount(p, &request, &result);
++	native_owner_cache_mount_status = error;
++	if (error) goto done;
++	native_owner_cache_stage = 4;
++	error = vnode_lookup(mountpoint, 0, &mounted_root, vfs_context_current());
++	if (error) goto done;
++	mount_t cache_mount = vnode_mount(mounted_root);
++	device_vnode = vfs_devvp(cache_mount);
++	dev_t actual = device_vnode ? vnode_specrdev(device_vnode) : NODEV;
++	if (device_vnode) vnode_put(device_vnode);
++	native_owner_cache_mounted_device = actual;
++	int readonly = (vfs_flags(cache_mount) & MNT_RDONLY) != 0;
++	native_owner_cache_readonly = readonly;
++	native_owner_cache_actual_mount_flags = vfs_flags(cache_mount);
++	native_owner_cache_current_root = (uintptr_t)rootvnode;
++	int native_union = (vfs_flags(cache_mount) & MNT_UNION) &&
++	    vnode_mountedhere(original_os_root) == cache_mount && rootvnode == mounted_root;
++	native_owner_cache_native_union = native_union;
++	cache_authorized = readonly && actual == selected &&
++	    !strcmp(vfs_statfs(cache_mount)->f_fstypename, "apfs") && native_verified_block_root_authorized(actual);
++#if defined(XNU_OWNER_UNION_SYSTEMOS) && XNU_OWNER_UNION_SYSTEMOS
++	cache_authorized = cache_authorized && native_union;
++#endif
++	if (!cache_authorized) { error = EAUTH; goto done; }
++	native_owner_cache_stage = 5;
++#if !defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS
++	if ((error = copyout(environment, environment_vector[0], strlen(environment) + 1)) != 0 ||
++	    (error = copyout(environment_vector, scratch + 0x500, sizeof(environment_vector))) != 0) goto done;
++#if defined(XNU_OWNER_CRYPTEX_FILES) && XNU_OWNER_CRYPTEX_FILES
++	if ((error = copyout(fallback, scratch + 0x600, strlen(fallback) + 1)) != 0) goto done;
++#endif
++	*envp = scratch + 0x500;
++#else
++	*envp = USER_ADDR_NULL;
++#endif
++	native_owner_cache_stage = 6;
++done:
++	if (mounted_root) vnode_put(mounted_root);
++	int root_recheck = root_authorized && native_verified_block_root_authorized(root_device);
++	native_owner_cache_root_recheck = root_recheck;
++	if (!root_recheck) error = EAUTH;
++#if defined(XNU_OWNER_BOOT_MANIFEST) && XNU_OWNER_BOOT_MANIFEST
++	if (!error && cache_authorized && root_recheck &&
++	    !native_owner_publish_boot_manifest(root_device, "04769D26-2CA0-4825-B443-E2E5F88300F2",
++	        selected, volume)) error = EAUTH;
++#endif
++#if defined(XNU_OWNER_CACHE_STARTUP) && XNU_OWNER_CACHE_STARTUP
++	if (!error && cache_authorized && root_recheck) {
++		/* Original dyld bit 3 selects no ignition; the owner chain and actual
++		 * readonly mounts above supply image authentication in this mode. */
++		dyld_flags |= UINT64_C(8);
++		commpage_update_dyld_flags(dyld_flags);
++		native_owner_cache_dyld_flags = dyld_flags;
++	}
++#endif
++	native_owner_cache_authorized = cache_authorized;
++	native_owner_cache_status = error;
++	native_owner_cache_checkpoint(error, cache_authorized);
++	return error;
++}
++#endif
++
++#if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++#if !defined(XNU_OWNER_BOOT_MANIFEST) || !XNU_OWNER_BOOT_MANIFEST
++#error Scratch Data mounting requires the authenticated original OS startup path
++#endif
++#if defined(XNU_NATIVE_RAM_BLOCK) && XNU_NATIVE_RAM_BLOCK
++#ifndef XNU_OWNER_DATA_VOLUME_UUID
++#error Supply the observed scratch volume UUID for the IOKit backend
++#endif
++extern int native_ram_block_volume_seed(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);
++#endif
++extern dev_t mdevlookup(int);
++extern int mdevgetrange(int, uint64_t *, uint64_t *);
++volatile int native_owner_data_status = -1;
++volatile int native_owner_data_stage = 0;
++volatile int native_owner_data_readonly = -1;
++volatile dev_t native_owner_data_device = NODEV;
++uint64_t native_owner_data_seed_base, native_owner_data_seed_size;
++uint8_t native_owner_data_seed_sha256[32];
++char native_owner_data_device_path[64];
++
++/* Boot-time read-only union views of owner-provided GPU addon content over sealed system directories, mounted after the Data mount and
++ * before launchd starts: the Adreno Metal plugin bundle over /System/Library/Extensions (the original Metal discovery loads
++ * /System/Library/Extensions/<MetalPluginName>.bundle) and an owner launchd job over /System/Library/LaunchDaemons (a process outside
++ * every sandbox profile). Only with boot-arg sheng-gpu-addon=1. Never panics: a missing source directory or a refused mount only
++ * records its status. The backing directories are owner Data (not an authenticated immutable volume); code in them still has to
++ * pass AMFI through the loaded trust cache. */
++extern volatile int native_bindfs_boot_mount;
++volatile int native_gpu_addon_stage = 0;
++volatile int native_gpu_addon_status = -1;
++volatile int native_gpu_addon2_stage = 0;
++volatile int native_gpu_addon2_status = -1;
++static void
++native_gpu_addon_mount(proc_t p, user_addr_t scratch, user_addr_t offset, const char *source, size_t source_size,
++    const char *point, size_t point_size, const char *visible, const char *own, volatile int *stage, volatile int *status)
++{
++	vnode_t probe = NULLVP;
++	int error;
++	*stage = 1;
++	error = vnode_lookup(source, 0, &probe, vfs_context_current());
++	if (error) {
++		*status = error;
++		return;
++	}
++	vnode_put(probe);
++	probe = NULLVP;
++	*stage = 2;
++	struct mount_args request = {.type = scratch + offset, .path = scratch + offset + 0x20,
++	    .flags = MNT_RDONLY | MNT_UNION, .data = scratch + offset + 0x100};
++	int32_t result = 0;
++	if ((error = copyout("bindfs", request.type, 7)) || (error = copyout(point, request.path, point_size)) ||
++	    (error = copyout(source, request.data, source_size))) {
++		*status = error;
++		return;
++	}
++	native_bindfs_boot_mount = 1;
++	error = mount(p, &request, &result);
++	native_bindfs_boot_mount = 0;
++	if (error) {
++		*status = error;
++		return;
++	}
++	*stage = 3;
++	/* The union must still show a sealed lower entry next to the owner's. */
++	error = vnode_lookup(visible, 0, &probe, vfs_context_current());
++	if (!error) {
++		vnode_put(probe);
++		probe = NULLVP;
++		*stage = 4;
++		/* ... and the owner's own entry must be visible through it (stage 5). */
++		error = vnode_lookup(own, 0, &probe, vfs_context_current());
++		if (!error) {
++			vnode_put(probe);
++			probe = NULLVP;
++			*stage = 5;
++		}
++	}
++	*status = error;
++}
++static void
++native_gpu_addon_prepare(proc_t p, user_addr_t scratch)
++{
++	uint32_t enabled = 0;
++	if (!PE_parse_boot_argn("sheng-gpu-addon", &enabled, sizeof(enabled)) || enabled != 1) {
++		return;
++	}
++	static const char extensions_source[] = "/private/var/ngpu/addons", extensions_point[] = "/System/Library/Extensions";
++	static const char daemons_source[] = "/private/var/ngpu/daemons", daemons_point[] = "/System/Library/LaunchDaemons";
++	native_gpu_addon_mount(p, scratch, 0x400, extensions_source, sizeof(extensions_source), extensions_point,
++	    sizeof(extensions_point), "/System/Library/Extensions/AGXMetalA10.bundle",
++	    "/System/Library/Extensions/NativeAdrenoMetal.bundle/Info.plist", &native_gpu_addon_stage,
++	    &native_gpu_addon_status);
++	native_gpu_addon_mount(p, scratch, 0x600, daemons_source, sizeof(daemons_source), daemons_point, sizeof(daemons_point),
++	    "/System/Library/LaunchDaemons/com.apple.backboardd.plist",
++	    "/System/Library/LaunchDaemons/org.blu-sharky.adrenoprobed.plist", &native_gpu_addon2_stage, &native_gpu_addon2_status);
++}
++
++static int
++native_owner_data_prepare(proc_t p, user_addr_t scratch)
++{
++	uint64_t base = 0, size = 0;
++	dev_t device = NODEV;
++	int error = EINVAL;
++	vnode_t data_root = NULLVP;
++	char device_path[64] = "/dev/md0";
++#if defined(XNU_NATIVE_RAM_BLOCK) && XNU_NATIVE_RAM_BLOCK
++	/* The typed provider supplies logical seed identity for both dense and
++	 * sparse media. A sparse disk has no contiguous logical-byte address. */
++	if (!native_ram_block_volume_seed(XNU_OWNER_DATA_VOLUME_UUID, &device, device_path,
++	    sizeof(device_path), &base, &size, native_owner_data_seed_sha256)) { error = ENOENT; goto done; }
++	/* The typed provider's disk may be far larger than 2 GiB (a persistent Data disk keeps only its seed's nonzero pages). */
++	if (!size || size > UINT64_C(0x10000000000) || (size & 4095)) goto done;
++#else
++	device = mdevlookup(0);
++	if (device == NODEV || mdevgetrange(0, &base, &size) || base < VM_MIN_KERNEL_ADDRESS ||
++	    !size || size > UINT64_C(0x80000000) || (base & 4095) || (size & 4095)) goto done;
++	SHA256_CTX context;
++	SHA256_Init(&context);
++	SHA256_Update(&context, (const void *)base, size);
++	SHA256_Final(native_owner_data_seed_sha256, &context);
++#endif
++	native_owner_data_seed_base = base;
++	native_owner_data_seed_size = size;
++	native_owner_data_stage = 1;
++	strlcpy(native_owner_data_device_path, device_path, sizeof(native_owner_data_device_path));
++	uint8_t payload[0x150] = {0};
++	user64_addr_t spec = scratch + 0x160;
++	uint16_t mode = 1;
++	uint32_t anonymous_owner = 99;
++	memcpy(payload, &spec, sizeof(spec));
++	memcpy(payload + 16, &mode, sizeof(mode));
++	memcpy(payload + 0x144, &anonymous_owner, sizeof(anonymous_owner));
++	memcpy(payload + 0x148, &anonymous_owner, sizeof(anonymous_owner));
++	struct mount_args request = {.type = scratch + 0x100, .path = scratch + 0x120,
++	    .flags = 0, .data = scratch + 0x200};
++	int32_t result = 0;
++	if ((error = copyout("apfs", request.type, 5)) ||
++	    (error = copyout("/private/var", request.path, 13)) ||
++	    (error = copyout(device_path, spec, strlen(device_path) + 1)) ||
++	    (error = copyout(payload, request.data, sizeof(payload)))) goto done;
++	native_owner_data_stage = 2;
++	error = mount(p, &request, &result);
++	if (error) goto done;
++	native_owner_data_stage = 3;
++	error = vnode_lookup("/private/var", 0, &data_root, vfs_context_current());
++	if (error) goto done;
++	mount_t data_mount = vnode_mount(data_root);
++	vnode_t device_node = vfs_devvp(data_mount);
++	dev_t actual = device_node ? vnode_specrdev(device_node) : NODEV;
++	if (device_node) vnode_put(device_node);
++	native_owner_data_device = actual;
++	native_owner_data_readonly = (vfs_flags(data_mount) & MNT_RDONLY) != 0;
++	if (actual != device || (vfs_flags(data_mount) & MNT_RDONLY) ||
++	    strcmp(vfs_statfs(data_mount)->f_fstypename, "apfs")) error = EINVAL;
++	if (!error) native_owner_data_stage = 4;
++	if (!error) native_gpu_addon_prepare(p, scratch);
++done:
++	if (data_root) vnode_put(data_root);
++	native_owner_data_status = error;
++	return error;
++}
++#endif
++
+ static int
+-load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
++load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path, user_addr_t envp)
+ {
+ 	int retval[2];
+ 	int error;
+@@ -7086,7 +7470,7 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
+ 	 */
+ 	init_exec_args.fname = argv0;
+ 	init_exec_args.argp = scratch_addr;
+-	init_exec_args.envp = USER_ADDR_NULL;
++	init_exec_args.envp = envp;
+ 
+ 	/*
+ 	 * So that init task is set with uid,gid 0 token
+@@ -7141,6 +7525,8 @@ static const char * init_programs[] = {
+ void
+ load_init_program(proc_t p)
+ {
++	boot_progress_stage("load_init_program enter");
++	fuxi_trace_mark(23);
+ 	uint32_t i;
+ 	int error;
+ 	vm_map_t map = current_map();
+@@ -7148,12 +7534,45 @@ load_init_program(proc_t p)
+ 	mach_vm_size_t map_page_size = vm_map_page_size(map);
+ 
+ 	(void) mach_vm_allocate_kernel(map, &scratch_addr, map_page_size, VM_FLAGS_ANYWHERE, VM_KERN_MEMORY_NONE);
++	user_addr_t init_envp = USER_ADDR_NULL;
++#if defined(XNU_OWNER_CACHE_MOUNT) && XNU_OWNER_CACHE_MOUNT
++	boot_progress_stage("SystemOS mount enter");
++	int cache_error = native_owner_cache_prepare(p, (user_addr_t)scratch_addr, &init_envp);
++	boot_progress_stage("SystemOS mount returned");
++	if (cache_error) panic("offline owner SystemOS mount failed: %d", cache_error);
++#endif
++#if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++	boot_progress_stage("Data mount enter");
++	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
++	boot_progress_stage("Data mount returned");
++	if (data_error) panic("offline scratch Data mount failed: %d", data_error);
++#if defined(XNU_BOOT_PROGRESS) && XNU_BOOT_PROGRESS
++	extern int sheng_boot_watchdog_policy(void *, uint64_t);
++	boot_progress_stage("temporary watchdog launch policy enter");
++	int policy_error=sheng_boot_watchdog_policy(p, (uint64_t)scratch_addr);
++	if (policy_error) panic("sheng watchdog launch policy failed: %d", policy_error);
++	boot_progress_stage("temporary watchdog launch policy ready");
++#endif
++#endif
+ #if CONFIG_MEMORYSTATUS
+ 	(void) memorystatus_init_at_boot_snapshot();
++	fuxi_trace_mark(24);
+ #endif /* CONFIG_MEMORYSTATUS */
+ 
++#if (DEBUG || DEVELOPMENT) && defined(XNU_NATIVE_AIR_INIT) && XNU_NATIVE_AIR_INIT
++	int offline_air = 0;
++	if (PE_parse_boot_argn("offline-air-init", &offline_air, sizeof(offline_air)) && offline_air) {
++		if (offline_air != 1) panic("offline AIR init invalid selector");
++		error = load_init_program_at_path(p, (user_addr_t)scratch_addr,
++		    "/private/var/tmp/air-native", init_envp);
++		if (error) panic("offline signed AIR instrument exec failed: %d", error);
++		return;
++	}
++#endif
++
+ #if DEBUG || DEVELOPMENT
+ 	/* Check for boot-arg suffix first */
++	fuxi_trace_mark(25);
+ 	char launchd_suffix[64];
+ 	if (PE_parse_boot_argn("launchdsuffix", launchd_suffix, sizeof(launchd_suffix))) {
+ 		char launchd_path[128];
+@@ -7162,8 +7581,7 @@ load_init_program(proc_t p)
+ 
+ 		if (is_release_suffix) {
+ 			printf("load_init_program: attempting to load /sbin/launchd\n");
+-			error = load_init_program_at_path(p, (user_addr_t)scratch_addr, "/sbin/launchd");
+-			if (!error) {
++				if (!error) {
+ 				return;
+ 			}
+ 
+@@ -7173,7 +7591,7 @@ load_init_program(proc_t p)
+ 			strlcat(launchd_path, launchd_suffix, sizeof(launchd_path));
+ 
+ 			printf("load_init_program: attempting to load %s\n", launchd_path);
+-			error = load_init_program_at_path(p, (user_addr_t)scratch_addr, launchd_path);
++			error = load_init_program_at_path(p, (user_addr_t)scratch_addr, launchd_path, init_envp);
+ 			if (!error) {
+ 				return;
+ 			} else if (error != ENOENT) {
+@@ -7185,8 +7603,11 @@ load_init_program(proc_t p)
+ 
+ 	error = ENOENT;
+ 	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
++		fuxi_trace_mark(26);
+ 		printf("load_init_program: attempting to load %s\n", init_programs[i]);
+-		error = load_init_program_at_path(p, (user_addr_t)scratch_addr, init_programs[i]);
++		fuxi_trace_mark(27);
++		error = load_init_program_at_path(p, (user_addr_t)scratch_addr, init_programs[i], init_envp);
++		fuxi_trace_mark(28);
+ 		if (!error) {
+ 			return;
+ 		} else if (error != ENOENT) {
+@@ -7631,7 +8052,19 @@ process_signature(proc_t p, struct image_params *imgp)
+ 	 * which is unexpected but security framework does not
+ 	 * approve of exec, kill and return immediately.
+ 	 */
++	/* The bring-up PID 1 is our own unsigned Mach-O and the MAC layer (AMFI)
++	 * refuses it with EXEC_EXIT_REASON_SECURITY_POLICY (namespace 9, code 8).
++	 * When fuxi_allow_unsigned_exec is set (it lives in the platform-power
++	 * archive) the refusal is recorded and cleared so userland can come up
++	 * while the image is unsigned. It stays 0 unless that archive sets it. */
++	extern int fuxi_allow_unsigned_exec;
++	if (imgp->ip_mac_return != 0 && fuxi_allow_unsigned_exec) {
++		printf("fuxi: exec of %s refused by MAC policy (0x%x), continuing\n",
++		    p->p_name, imgp->ip_mac_return);
++		imgp->ip_mac_return = 0;
++	}
+ 	if (imgp->ip_mac_return != 0) {
++		boot_progress_process_stage(proc_getpid(p),p->p_name,"exec MAC policy REFUSED");
+ 		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXITREASON_CREATE) | DBG_FUNC_NONE,
+ 		    proc_getpid(p), OS_REASON_EXEC, EXEC_EXIT_REASON_SECURITY_POLICY, 0, 0);
+ 		signature_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_SECURITY_POLICY);
+@@ -7794,7 +8227,9 @@ done:
+ 		 * state.
+ 		 */
+ 
++		boot_progress_process_stage(proc_getpid(p),p->p_name,"exec process signature enter");
+ 		error = proc_process_signature(p, &signature_failure_reason);
++		boot_progress_process_stage(proc_getpid(p),p->p_name,error ? "exec process signature REFUSED" : "exec process signature accepted");
+ 	}
+ 
+ 	if (0 == error) {
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+index 11a8212..a284258 100644
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1,3 +1,6 @@
++extern void fuxi_trace_wait(int wait_status);
++extern void fuxi_trace_mark(int index);
++#include <kern/boot_progress.h>
+ /*
+  * Copyright (c) 2000-2016 Apple Inc. All rights reserved.
+  *
+@@ -1845,7 +1848,11 @@ proc_handle_critical_exit(proc_t p, int rv)
+ 	}
+ 
+ 	const char *prefix_str;
++#if defined(XNU_BOOT_PROGRESS) && XNU_BOOT_PROGRESS
++	char prefix_str_buf[1024];
++#else
+ 	char prefix_str_buf[128];
++#endif
+ 
+ 	if (p == initproc) {
+ 		if (strnstr(p->p_name, "preinit", sizeof(p->p_name))) {
+@@ -1858,21 +1865,46 @@ proc_handle_critical_exit(proc_t p, int rv)
+ 	} else {
+ 		/* For processes that aren't launchd, just use the process name and pid */
+ 		snprintf(prefix_str_buf, sizeof(prefix_str_buf), "%s[%d] exited", p->p_name, proc_getpid(p));
++		boot_progress_critical_exit(proc_getpid(p), prefix_str_buf, sizeof(prefix_str_buf));
+ 		prefix_str = prefix_str_buf;
+ 	}
+ 
++	fuxi_trace_wait(rv);
++	fuxi_trace_mark(29);
+ 	proc_crash_coredump(p);
+ 
++	fuxi_trace_mark(30);
+ 	sync(p, (void *)NULL, (int *)NULL);
++	fuxi_trace_mark(31);
++	{
++		/* Pin the SP verdict on the display: 60 = the pre-fix sp would have been aligned,
++		 * 68 = it would have been misaligned (8 mod 16). This is the last mark before the panic,
++		 * so it is what stays on screen. */
++		extern int fuxi_sp_old_low;
++		extern void fuxi_trace_mark(int index);
++		if (fuxi_sp_old_low >= 0) {
++			fuxi_trace_mark(60 + fuxi_sp_old_low);
++		}
++	}
+ 
+ 	if (p->p_exit_reason == OS_REASON_NULL) {
+-		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s -- no exit reason available -- (signal %d, exit status %d %s)",
+-		    prefix_str, WTERMSIG(rv), WEXITSTATUS(rv), ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""));
++		/* fuxi bring-up: also report whether timer interrupts exist at all. */
++		char fuxi_init_msg[256];
++		extern uint64_t fuxi_boot_timer_irqs;
++		extern int fuxi_sp_old_low;
++		snprintf(fuxi_init_msg, sizeof(fuxi_init_msg),
++		    "%s -- no exit reason available -- (signal %d, exit status %d %s) timer-irqs=%llu\nsp_old_low=%d",
++		    prefix_str, WTERMSIG(rv), WEXITSTATUS(rv),
++		    ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""),
++		    (unsigned long long)fuxi_boot_timer_irqs, fuxi_sp_old_low);
++		fuxi_trace_mark(32);
++		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s", fuxi_init_msg);
+ 	} else {
+-		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s %s -- exit reason namespace %d subcode 0x%llx description: %." LAUNCHD_PANIC_REASON_STRING_MAXLEN "s",
++		extern int fuxi_sp_old_low;
++		panic_with_options(0, NULL, DEBUGGER_OPTION_INITPROC_PANIC, "%s %s -- exit reason namespace %d subcode 0x%llx description: %." LAUNCHD_PANIC_REASON_STRING_MAXLEN "s\nsp_old_low=%d",
+ 		    ((proc_getcsflags(p) & CS_KILLED) ? "CS_KILLED" : ""),
+ 		    prefix_str, p->p_exit_reason->osr_namespace, p->p_exit_reason->osr_code,
+-		    exit_reason_desc ? exit_reason_desc : "none");
++		    exit_reason_desc ? exit_reason_desc : "none", fuxi_sp_old_low);
+ 	}
+ }
+ 
+@@ -1892,6 +1924,10 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
+ 	task_t task = proc_task(p);
+ 
+ 
++	boot_progress_exit(proc_getpid(p),p->p_name,rv,
++	    p->p_exit_reason ? p->p_exit_reason->osr_namespace : 0,
++	    p->p_exit_reason ? p->p_exit_reason->osr_code : 0);
++
+ 	if (p->p_crash_behavior != 0 || p == initproc) {
+ 		proc_handle_critical_exit(p, rv);
+ 	}
+diff --git a/bsd/kern/kern_sig.c b/bsd/kern/kern_sig.c
+index 6f93e15..07db38b 100644
+--- a/bsd/kern/kern_sig.c
++++ b/bsd/kern/kern_sig.c
+@@ -1,3 +1,4 @@
++extern void fuxi_trace_mark(int index);
+ /*
+  * Copyright (c) 1995-2016 Apple Inc. All rights reserved.
+  *
+@@ -73,6 +74,7 @@
+ 
+ #define SIGPROP         /* include signal properties table */
+ #include <sys/param.h>
++#include <mach/arm/thread_status.h>
+ #include <sys/resourcevar.h>
+ #include <sys/proc_internal.h>
+ #include <sys/kauth.h>
+@@ -2573,6 +2575,32 @@ sigout_unlocked:
+ void
+ psignal(proc_t p, int signum)
+ {
++	if (signum == SIGBUS) {
++		extern struct arm_saved_state *get_user_regs(thread_t);
++		struct arm_saved_state *state = get_user_regs(current_thread());
++		register_t pc = state ? get_saved_state_pc(state) : 0;
++		register_t far = state ? get_saved_state_far(state) : 0;
++		register_t sp = state ? get_saved_state_sp(state) : 0;
++		extern void fuxi_pagein_last(uint64_t *offset, int64_t *resid, int *error,
++		    unsigned int *total);
++		uint64_t read_offset = 0;
++		int64_t read_resid = 0;
++		int read_error = 0;
++		unsigned int read_total = 0;
++		fuxi_pagein_last(&read_offset, &read_resid, &read_error, &read_total);
++		extern void fuxi_fault_last(unsigned long long *far, unsigned long long *pc, unsigned *esr,
++		    unsigned *fault_code, unsigned *fault_type, unsigned *total);
++		unsigned long long abort_far = 0, abort_pc = 0;
++		unsigned abort_esr = 0, abort_code = 0, abort_type = 0, abort_total = 0;
++		fuxi_fault_last(&abort_far, &abort_pc, &abort_esr, &abort_code, &abort_type, &abort_total);
++		extern int fuxi_sp_old_low;
++		fuxi_trace_mark(46);
++		panic("fuxi-sigbus: caller=%p pid=%d pc=%llx far=%llx sp=%llx reads=%u last_off=%llu last_resid=%lld last_err=%d aborts=%u a_far=%llx a_pc=%llx a_esr=%x a_code=%x a_type=%x sp_old_low=%d",
++		    __builtin_return_address(0), proc_getpid(p),
++		    (unsigned long long)pc, (unsigned long long)far, (unsigned long long)sp,
++		    read_total, (unsigned long long)read_offset, (long long)read_resid, read_error,
++		    abort_total, abort_far, abort_pc, abort_esr, abort_code, abort_type, fuxi_sp_old_low);
++	}
+ 	psignal_internal(p, NULL, NULL, 0, signum, NULL);
+ }
+ 
+diff --git a/bsd/kern/mach_loader.c b/bsd/kern/mach_loader.c
+index 4435c16..b5c1bdc 100644
+--- a/bsd/kern/mach_loader.c
++++ b/bsd/kern/mach_loader.c
+@@ -1,3 +1,4 @@
++extern void fuxi_trace_mark(int index);
+ /*
+  * Copyright (c) 2000-2020 Apple Inc. All rights reserved.
+  *
+@@ -449,6 +450,7 @@ load_machfile(
+ 	load_result_t           *result
+ 	)
+ {
++	fuxi_trace_mark(44);
+ 	struct vnode            *vp = imgp->ip_vp;
+ 	off_t                   file_offset = imgp->ip_arch_offset;
+ 	off_t                   macho_size = imgp->ip_arch_size;
+@@ -511,8 +513,12 @@ load_machfile(
+ 
+ #if defined(__arm64__)
+ 	if (result->is_64bit_addr) {
++#if !defined(APPLE_ARM64_ARCH_FAMILY) && !__ARM_16K_PG__
++		vm_map_set_page_shift(map, FOURK_PAGE_SHIFT);
++#else
+ 		/* enforce 16KB alignment of VM map entries */
+ 		vm_map_set_page_shift(map, SIXTEENK_PAGE_SHIFT);
++#endif
+ 	} else {
+ 		vm_map_set_page_shift(map, page_shift_user32);
+ 	}
+@@ -580,6 +586,24 @@ load_machfile(
+ 	lret = parse_machfile(vp, map, thread, header, file_offset, macho_size,
+ 	    0, aslr_page_offset, dyld_aslr_page_offset, result,
+ 	    NULL, imgp);
++	if (lret == LOAD_SUCCESS) {
++		extern void fuxi_load_bad(unsigned long long entry, unsigned long long sp,
++		    unsigned long long size);
++		unsigned long long entry = (unsigned long long)result->entry_point;
++		unsigned long long sp = (unsigned long long)result->user_stack;
++		unsigned long long size = (unsigned long long)result->user_stack_size;
++		/* Panic only when the result cannot be a usable address space, so a normal load
++		 * leaves userland running and the fault probes can fire.
++		 *
++		 * size == 0 is NORMAL here: user_stack_size is only filled in by the LC_MAIN path
++		 * (see the assignments around mach_loader.c:2696/2705), and kern_exec.c:7032 replaces a
++		 * zero with RLIMIT_STACK later. Treating it as fatal aborted every boot of an
++		 * LC_UNIXTHREAD binary in our own probe, which is exactly what image A5 showed
++		 * ("fuxi-load-bad: entry=100003fe4 sp=16fe00000 size=0"). */
++		if (entry == 0 || sp == 0 || sp >= 0xfffffff000000000ULL) {
++			fuxi_load_bad(entry, sp, size);
++		}
++	}
+ 
+ 	if (lret != LOAD_SUCCESS) {
+ 		vm_map_deallocate(map); /* will lose pmap reference too */
+@@ -934,6 +958,7 @@ parse_machfile(
+ 		}
+ 	}
+ 
++
+ 	/*
+ 	 *  Scan through the commands, processing each one as necessary.
+ 	 *  We parse in three passes through the headers:
+@@ -1356,6 +1381,16 @@ parse_machfile(
+ 				if (pass != 3) {
+ 					break;
+ 				}
++				{
++					struct encryption_info_command *eic =
++					    (struct encryption_info_command *)lcp;
++					extern void fuxi_decrypt_panic(unsigned cmd, unsigned cmdsize,
++					    unsigned cryptid, unsigned cryptoff, unsigned cryptsize,
++					    unsigned offset);
++					fuxi_decrypt_panic(eic->cmd, eic->cmdsize,
++					    eic->cryptid, eic->cryptoff, eic->cryptsize,
++					    (unsigned)((char *)lcp - (char *)addr));
++				}
+ 				ret = set_code_unprotect(
+ 					(struct encryption_info_command *) lcp,
+ 					addr, map, slide, vp, file_offset,
+@@ -2492,6 +2527,10 @@ load_segment(
+ 		    scp->initprot,
+ 		    scp->maxprot,
+ 		    result);
++		{
++			extern void fuxi_seg_note(unsigned long long delta, unsigned long long start, int ret);
++			fuxi_seg_note((unsigned long long)delta_size, (unsigned long long)tmp_start, (int)kr);
++		}
+ 		if (kr != KERN_SUCCESS) {
+ 			DEBUG4K_ERROR("LOAD_NOSPACE 0x%llx 0x%llx kr 0x%x\n", (unsigned long long)tmp_start, (uint64_t)delta_size, kr);
+ 			return LOAD_NOSPACE;
+diff --git a/libkern/c++/OSKext.cpp b/libkern/c++/OSKext.cpp
+index becc2f5..6b4c43b 100644
+--- a/libkern/c++/OSKext.cpp
++++ b/libkern/c++/OSKext.cpp
+@@ -73,6 +73,11 @@ extern "C" {
+ 
+ #include <libkern/OSKextLibPrivate.h>
+ #include <libkern/c++/OSKext.h>
++
++#if CONFIG_MACF
++extern "C" int mac_late;
++extern "C" __attribute__((used)) const uint32_t native_prelink_security_init_version = 1;
++#endif
+ #include <libkern/c++/OSLib.h>
+ 
+ #include <IOKit/IOLib.h>
+@@ -8358,6 +8363,16 @@ OSKext::OSKextLogDriverKitInfoLoad(OSKext *kext)
+ OSReturn
+ OSKext::start(bool startDependenciesFlag)
+ {
++#if defined(XNU_SHENG_PMGR) && XNU_SHENG_PMGR
++	/* The AMFI early security initialiser runs from this path (see
++	 * kits/NativePrelink/patches/xnu-10063.141.1-security-init.patch) and needs
++	 * an ApplePMGRNub service, whose class is defined by com.apple.driver.ApplePMGR.
++	 * By the time a kext is started its dependencies are loaded, so publish the
++	 * nub here, before AMFI looks for it. The call is idempotent and retries on
++	 * later starts while the class is still missing. */
++	extern void sheng_pmgr_publish_nub(void);
++	sheng_pmgr_publish_nub();
++#endif
+ 	OSReturn                            result = kOSReturnError;
+ 	kern_return_t                       (* startfunc)(kmod_info_t *, void *);
+ 	unsigned int                        i, count;
+@@ -8448,6 +8463,43 @@ OSKext::start(bool startDependenciesFlag)
+ 		result = startfunc(kmod_info, kmodStartData);
+ 	}
+ 
++	/* An explicitly linked security initializer must run with its real
++	 * dependencies and constructors ready, before MAC policy lockdown.
++	 * It executes original component code; no policy result is supplied.
++	 */
++	{
++		OSObject *earlyInitProperty = getPropertyForHostArch("_NativePrelinkEarlySecurityInit");
++		if (result == KERN_SUCCESS && earlyInitProperty != NULL) {
++	#if CONFIG_MACF
++			OSNumber *earlyInit = OSDynamicCast(OSNumber, earlyInitProperty);
++			uintptr_t target = 0;
++			bool executable = false;
++			if (!earlyInit || !isPrelinked() || mac_late ||
++			    getPropertyForHostArch("AppleSecurityExtension") != kOSBooleanTrue ||
++			    __builtin_add_overflow((uintptr_t)earlyInit->unsigned64BitValue(),
++			    vm_kernel_slide, &target) || (target & 3)) {
++				panic("NativePrelink: invalid early security initializer or phase");
++			}
++			kernel_mach_header_t *header = (kernel_mach_header_t *)kmod_info->address;
++			for (kernel_segment_command_t *seg = firstsegfromheader(header);
++			    seg != NULL; seg = nextsegfromheader(header, seg)) {
++				if (seg->initprot == (VM_PROT_READ | VM_PROT_EXECUTE) &&
++				    !(seg->maxprot & VM_PROT_WRITE) && seg->vmsize >= 4 &&
++				    target >= seg->vmaddr && target - seg->vmaddr <= seg->vmsize - 4) {
++					executable = true;
++					break;
++				}
++			}
++			if (!executable) {
++				panic("NativePrelink: early security initializer outside module code");
++			}
++			((void (*)(void))target)();
++	#else
++			panic("NativePrelink: early security initializer requires MAC framework");
++	#endif
++		}
++	}
++
+ 	flags.starting = 0;
+ 
+ 	/* On success overlap the setting of started/starting. On failure just
+@@ -16325,6 +16377,9 @@ OSKext::printKextPanicLists(int (*printf_func)(const char *fmt, ...))
+ /*********************************************************************
+ * Assumes sKextLock is held.
+ *********************************************************************/
++extern "C" void fuxi_ks_note(unsigned long long branch, unsigned long long size,
++    unsigned long long old, unsigned long long prot, unsigned long long dest);
++
+ /* static */
+ void
+ OSKext::updateLoadedKextSummaries(void)
+@@ -16374,7 +16429,15 @@ OSKext::updateLoadedKextSummaries(void)
+ 	size += maxKexts * sizeof(*gLoadedKextSummaries->summaries);
+ 	size = round_page(size);
+ 
+-	if (gLoadedKextSummaries == NULL || sLoadedKextSummariesAllocSize < size) {
++	/*
++	 * Always take the fresh-allocation path. The reuse path calls vm_map_protect() to make the
++	 * published (read-only) buffer writable again, and on this kernel that call returns success
++	 * without making the last pages writable (device evidence: ks_branch=2 ks_size=0x5000
++	 * ks_old=0x5000 ks_prot=0, yet the store to dest+0x3000 still took an EL1 permission fault).
++	 * Allocating and publishing a new buffer avoids relying on the broken protect path; the old
++	 * buffer is freed below before the new one is allocated.
++	 */
++	if (1 || gLoadedKextSummaries == NULL || sLoadedKextSummariesAllocSize < size) {
+ 		if (gLoadedKextSummaries) {
+ 			kmem_free(kernel_map, (vm_offset_t)gLoadedKextSummaries, sLoadedKextSummariesAllocSize);
+ 			gLoadedKextSummaries = NULL;
+@@ -16407,6 +16470,11 @@ OSKext::updateLoadedKextSummaries(void)
+ 	/* Populate the summary header.
+ 	 */
+ 
++	{
++		fuxi_ks_note((summaryHeaderAlloc != NULL) ? 1ull : 2ull,
++		    (unsigned long long)summarySize, (unsigned long long)sLoadedKextSummariesAllocSize,
++		    (unsigned long long)result, (unsigned long long)(uintptr_t)summaryHeader);
++	}
+ 	bzero(summaryHeader, summarySize);
+ 	summaryHeader->version = kOSKextLoadedKextSummaryVersion;
+ 	summaryHeader->entry_size = sizeof(OSKextLoadedKextSummary);
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index ff5296d..c8fd709 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1,3 +1,4 @@
++#include <kern/boot_progress.h>
+ /*
+  * Copyright (c) 2012-2023 Apple Inc. All rights reserved.
+  *
+@@ -606,6 +607,81 @@ is_platform_error(uint32_t esr)
+ void
+ sleh_synchronous(arm_context_t *context, uint32_t esr, vm_offset_t far, __unused bool did_initiate_panic_lockdown)
+ {
++	{
++		extern void fuxi_trace_abort(unsigned esr);
++		extern void fuxi_trace_page(unsigned page);
++		unsigned class = (esr >> 26) & 0x3fu;
++		{
++			uint64_t pc = (uint64_t)get_saved_state_pc(&context->ss);
++			/* EL0 instruction and data aborts are the user-fault paths. Panic with the
++			 * hardware registers so the (now working) panic screen prints them. */
++			if (class == 0x20u) {
++				panic("fuxi-iabort-el0: esr=%x far=%llx pc=%llx",
++				    (unsigned)esr, (unsigned long long)far, (unsigned long long)pc);
++			}
++			if (class == 0x24u) {
++				/* A repeated EL0 data abort with no panic means the fault is not being resolved
++				 * (or is resolved and re-taken). Count them; on overflow, panic with the last
++				 * registers so a livelock becomes a readable screen instead of a flickering
++				 * display. 64 is chosen so a legitimate first-touch burst is not affected. */
++				{
++					extern unsigned long long fuxi_loop_count;
++					extern unsigned long long fuxi_loop_esr, fuxi_loop_far, fuxi_loop_pc;
++					fuxi_loop_count++;
++					fuxi_loop_esr = (unsigned long long)esr;
++					fuxi_loop_far = (unsigned long long)far;
++					fuxi_loop_pc = (unsigned long long)pc;
++					if (fuxi_loop_count > 64u) {
++						panic("fuxi-fault-loop: count=%llu esr=%llx far=%llx pc=%llx",
++						    fuxi_loop_count, fuxi_loop_esr, fuxi_loop_far,
++						    fuxi_loop_pc);
++					}
++				}
++				/* deliberately NOT a panic: an EL0 data abort is normally resolved by
++				 * handle_user_abort() -> vm_fault(). Panicking here pre-empted that path and made a
++				 * perfectly mapped lazy zero-fill page look like a mapping failure (images A6/A7 were
++				 * misread because of it). A real vm_fault failure is still reported by
++				 * fuxi_vmfault_panic(). No trace here: this file declares fuxi_trace_mark() only
++				 * much later down, and calling it from here needs a matching prototype. */
++				(void)pc;
++			}
++			if ((class == 0x21u || class == 0x25u) &&
++			    (current_thread() == NULL || current_thread()->machine.expected_fault_handler == NULL)) {
++				uint64_t base = 0xfffffff007004000ULL;
++				unsigned page = (pc > base) ? (unsigned)((pc - base) >> 12) : 0u;
++				fuxi_trace_abort(esr);
++				fuxi_trace_page(page);
++				/*
++				 * Kernel-mode (EL1) data abort: "permission fault" means the page exists but this
++				 * write is not allowed. Repeating it in a loop redraws the display faster than the
++				 * panel refreshes (the 37/15/9 screen). After a handful of repeats, stop with the
++				 * registers so the offending write is identifiable.
++				 */
++				if (class == 0x25u) {
++					static unsigned long long fuxi_el1_abort_count = 0;
++					fuxi_el1_abort_count++;
++					if (fuxi_el1_abort_count > 8ull) {
++						arm_saved_state64_t *ss = saved_state64(&context->ss);
++						extern unsigned long long fuxi_ks_branch, fuxi_ks_size, fuxi_ks_old;
++						extern unsigned long long fuxi_ks_prot, fuxi_ks_dest;
++						panic("fuxi-el1-abort-loop: n=%llu esr=%llx far=%llx pc=%llx "
++						    "x0=%llx x2=%llx lr=%llx | ks_branch=%llu ks_size=%llx ks_old=%llx ks_prot=%llu ks_dest=%llx",
++						    fuxi_el1_abort_count, (unsigned long long)esr,
++						    (unsigned long long)far, (unsigned long long)pc,
++						    (unsigned long long)ss->x[0], (unsigned long long)ss->x[2],
++						    (unsigned long long)ss->lr,
++						    fuxi_ks_branch, fuxi_ks_size, fuxi_ks_old, fuxi_ks_prot, fuxi_ks_dest);
++					}
++				}
++			}
++		}
++		if (class == 0x20u) {
++			/* Instruction abort from EL0: this is the user-fault path we cannot see otherwise.
++			 * Panic with the hardware registers so the panic screen (now working) prints them. */
++			uint64_t upc = (uint64_t)get_saved_state_pc(&context->ss);
++			panic("fuxi-elfault: esr=%x far=%llx pc=%llx", (unsigned)esr, (unsigned long long)far, (unsigned long long)upc);
++		}
++	}
+ 	esr_exception_class_t  class   = ESR_EC(esr);
+ 	arm_saved_state_t    * state   = &context->ss;
+ 	thread_t               thread  = current_thread();
+@@ -1229,6 +1305,7 @@ handle_breakpoint(arm_saved_state_t *state, uint32_t esr __unused)
+ 	mach_exception_data_type_t codes[2]  = {EXC_ARM_BREAKPOINT};
+ 	mach_msg_type_number_t     numcodes  = 2;
+ 
++	boot_progress_user_breakpoint(state, esr);
+ #if __has_feature(ptrauth_calls)
+ 	if (ESR_EC(esr) == ESR_EC_BRK_AARCH64 &&
+ 	    brk_comment_is_ptrauth(ISS_BRK_COMMENT(esr))) {
+@@ -1539,6 +1616,13 @@ handle_user_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr
+ 	mach_msg_type_number_t     numcodes = 2;
+ 	thread_t                   thread   = current_thread();
+ 
++	{
++		extern void fuxi_fault_record(unsigned long long far, unsigned esr, unsigned fault_code,
++		    unsigned fault_type, unsigned long long pc);
++		fuxi_fault_record((unsigned long long)fault_addr, (unsigned)esr, (unsigned)fault_code,
++		    (unsigned)fault_type, (unsigned long long)get_saved_state_pc(state));
++	}
++
+ 	(void)esr;
+ 	(void)expected_fault_handler;
+ 
+@@ -1585,6 +1669,14 @@ handle_user_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr
+ 		if (result == KERN_SUCCESS || result == KERN_ABORTED) {
+ 			return;
+ 		}
++		{
++			extern void fuxi_vmfault_panic(unsigned result, unsigned long long addr,
++			    unsigned prot, unsigned long long pc, unsigned long long sp);
++			fuxi_vmfault_panic((unsigned)result, (unsigned long long)vm_fault_addr,
++			    (unsigned)fault_type,
++			    (unsigned long long)get_saved_state_pc(state),
++			    (unsigned long long)get_saved_state_reg(state, 31));
++		}
+ 
+ 		/*
+ 		 * vm_fault() should never return KERN_FAILURE for page faults from user space.
+@@ -1597,6 +1689,11 @@ handle_user_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr
+ 		codes[0] = result;
+ 	} else if (is_alignment_fault(fault_code)) {
+ 		kern_return_t vmfkr = KERN_SUCCESS;
++		/* Class mark: 50 = took the alignment path (mark 52 follows if it ends as SIGBUS). */
++		{
++			extern void fuxi_trace_mark(unsigned);
++			fuxi_trace_mark(50);
++		}
+ 		thread->machine.recover_esr = 0;
+ 		thread->machine.recover_far = 0;
+ 		int result = handle_alignment_fault_from_user(state, &vmfkr);
+@@ -1638,6 +1735,10 @@ handle_user_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr
+ 			 * exception. Misaligned atomic emulation
+ 			 * timeouts fall in this category.
+ 			 */
++			{
++				extern void fuxi_trace_mark(unsigned);
++				fuxi_trace_mark(52);
++			}
+ 			codes[0] = EXC_ARM_DA_ALIGN;
+ 		}
+ 	} else if (is_parity_error(fault_code)) {
+@@ -1649,6 +1750,13 @@ handle_user_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr
+ 		panic("User parity error.");
+ #endif
+ 	} else {
++		/* Class mark: 54 = abort class that is neither a vm fault, an alignment fault nor a
++		 * parity error. On ARM64 this is where a synchronous external abort lands, and it
++		 * reaches user space as SIGBUS without any vm_fault panic. */
++		{
++			extern void fuxi_trace_mark(unsigned);
++			fuxi_trace_mark(54);
++		}
+ 		codes[0] = KERN_FAILURE;
+ 	}
+ 
+@@ -1672,6 +1780,7 @@ handle_user_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr
+ 	}
+ #endif /* __has_feature(ptrauth_calls) */
+ 
++	boot_progress_user_abort(state, esr, fault_addr);
+ 	if (user_fault_in_self_restrict_mode(thread) &&
+ 	    task_is_jit_exception_fatal(get_threadtask(thread))) {
+ 		extern int exit_with_jit_exception(proc_t p);
+@@ -2111,6 +2220,7 @@ sleh_irq(arm_saved_state_t *state)
+ 
+ 
+ 	sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_OTHER);
++	boot_progress_irq(get_saved_state_pc(state), get_saved_state_cpsr(state), get_saved_state_sp(state));
+ 
+ #if USE_APPLEARMSMP
+ 	PE_handle_ext_interrupt();

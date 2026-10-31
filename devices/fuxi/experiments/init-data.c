@@ -18,6 +18,7 @@
 
 #define O_RDONLY 0
 
+static volatile int g_initialized = 0x5a5a;  /* nonzero initializer: makes __DATA file-backed */
 static volatile int g_counter;      /* lives in __DATA */
 static volatile int g_second;       /* another __DATA slot, to make the segment non-trivial */
 
@@ -49,6 +50,10 @@ _start(void)
 	int code;
 
 	/* Write and read back the data segment before anything else. */
+	if (g_initialized != 0x5a5a) {
+		syscall1(SYS_exit, 23);
+	}
+	g_initialized = g_initialized + 1;
 	g_counter = 0x1234;
 	g_second = g_counter + 1;
 	code = (g_counter == 0x1234 && g_second == 0x1235) ? 20 : 23;
