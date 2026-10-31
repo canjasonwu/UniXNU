@@ -97,12 +97,12 @@ foreach ($name in @($known.Keys)) {
 }
 
 # 4) docs that quote a letter with a hex prefix must quote the manifest's hash
-$docs = @('START-HERE.md', 'TEST-RUNBOOK.md', 'HANDOVER.md', 'ARTIFACTS-MANIFEST.md')
+$docs = @('START-HERE.md', 'TEST-RUNBOOK.md', 'HANDOVER.md', 'ARTIFACTS-MANIFEST.md', 'FINAL-STATUS.md')
 foreach ($doc in $docs) {
     $path = Join-Path $root $doc
     if (-not (Test-Path -LiteralPath $path)) { continue }
     $text = Get-Content -LiteralPath $path -Raw
-    foreach ($m in [regex]::Matches($text, '\|\s*`?([A-Z][0-9]?)`?\s*\|\s*`?([0-9a-f]{8,12})`?')) {
+    foreach ($m in [regex]::Matches($text, '\|\s*`?\*{0,2}([A-Z][0-9]?)\*{0,2}`?\s*\|\s*`?([0-9a-f]{8,12})`?')) {
         $letter = $m.Groups[1].Value
         $prefix = $m.Groups[2].Value
         $checks++
