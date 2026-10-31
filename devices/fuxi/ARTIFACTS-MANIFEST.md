@@ -1,6 +1,7 @@
 # 待测镜像总清单（2026-10-31）
 
-> 快照：23 个 `boot.img`，全部在 `C:\Users\Jason Wu\dsh\artifacts-*\boot.img`。
+> 快照：**31 个** `boot.img`，全部在 `C:\Users\Jason Wu\dsh\artifacts-*\boot.img`。
+> 权威列表：`artifacts-manifest.json`（本表由它派生；两者由 `verify-consistency.ps1` 交叉校验）。
 > 完整性校验：`pwsh -NoProfile -File C:\Users\Jason Wu\dsh\verify-artifacts.ps1`（对 `artifacts-manifest.json`）
 
 ## 测试顺序（省轮次）
@@ -43,6 +44,19 @@
 | X | `07726d8a5a67` | 162 MiB | 时钟使能 + 驱动启动 + 只读检查 |
 | Y | `d98141a70444` | 162 MiB | 用现有 RAMDisk 注册第二个 md 并静默切根 |
 | Z | `4d8f7163c630` | 162 MiB | Y 的报告版（panic 打印设备号） |
+
+## 新增镜像（第 30-40 轮）
+
+| 字母 | sha256（前 12） | 大小 | 说明 |
+|---|---|---|---|
+| A2 | `084b679eec7a` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
+| A3 | `b8b328796e6a` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
+| A4 | `9b1897b5d157` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
+| C2 | `0db35a1a5e19` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
+| K2 | `8681a9cadd11` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
+| O | `b96533c22f73` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
+| Q | `283f52c2928e` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
+| T | `e82ed508f3aa` | 162 MiB | 见 FINAL-STATUS / TEST-RUNBOOK 的判读 |
 
 ## 相关文档
 
