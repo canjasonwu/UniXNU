@@ -38,16 +38,20 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image P
 pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image A5
 ```
 
-它同时做两件事：
+内核按**修复前**的算法算出旧 sp（`old_sp = 现在的 sp + 字符串区取整增量 + 指针区补齐增量`），然后：
 
-1. 内核按"修复前"的算法算出旧 sp（`old_sp = 现在的 sp + 字符串区取整增量 + 指针区补齐增量`），并点亮标记：
-   - **数码管 56** → 旧代码本来会给出**未对齐**的 sp（SP 假设成立）
-   - **数码管 57** → 旧代码也会对齐（SP 不是死因）
-2. 然后不停止，继续启动已经对齐入口的探针（exit7：`getpid` + `exit(1)`）：
-   - 出现 `… (signal 0, exit status 1)` → **用户态跑通了**（exec + syscall + exit 全链路）
-   - 仍 SIGBUS → 同一张镜像的 panic 会带 `pc/far/sp` 与 `a_esr`，直接进 C2/T 的判读
+1. 点亮标记 **56**（旧 sp 会不对齐）或 **57**（旧 sp 也会对齐）；
+2. 继续启动已经对齐入口的探针；
+3. **最终 panic 文本里带上 `sp_old_low=N`** —— 因为屏上的阶段数字只显示最新标记，56/57 会被后面的 29–31 覆盖，所以判定值放在文字里。
 
-所以：**只刷 A5 一张就能同时定性"SP 假设"和"用户态是否可用"**；A3 只在你想单独看原始 sp 数值时才需要。
+判读：
+
+| 屏幕 | 结论 |
+|---|---|
+| `… sp_old_low=8` | ✅ SP 假设成立：旧代码确实会给未对齐的 sp |
+| `… sp_old_low=0` | SP 不是死因，转 C2/T |
+| 同时出现 `(signal 0, exit status 1)` | ✅ 用户态在修复后跑通了 |
+| 仍 SIGBUS，panic 含 `pc/far/sp` 与 `a_esr` | 直接按 C2/T 的表判读 |
 ### A3（内核侧报告初始用户 SP 的低 4 位）
 
 这张**不需要用户态能跑**：内核在 `thread_setuserstack` 之前把算出来的 sp 打印出来并停下。

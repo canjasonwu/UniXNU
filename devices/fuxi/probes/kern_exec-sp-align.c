@@ -5782,8 +5782,10 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	 */
 	{
 		extern void fuxi_trace_mark(int index);
+		extern void fuxi_sp_note(int low);
 		uint64_t old_sp = (uint64_t)stack + (uint64_t)fuxi_round_delta + (uint64_t)fuxi_ptr_pad;
 		fuxi_trace_mark(((old_sp & 0xF) != 0) ? 56 : 57);
+		fuxi_sp_note((int)(old_sp & 0xF));
 	}
 
 	/*

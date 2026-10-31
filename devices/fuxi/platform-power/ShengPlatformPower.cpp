@@ -705,3 +705,18 @@ fuxi_fault_last(unsigned long long *far, unsigned long long *pc, unsigned *esr,
 	if (fault_code) *fault_code = fuxi_fault_ring[slot].fault_code;
 	if (fault_type) *fault_type = fuxi_fault_ring[slot].fault_type;
 }
+
+/*
+ * fuxi SP verdict: the low 4 bits of the user sp that the pre-fix arithmetic in
+ * exec_copyout_strings() would have produced. -1 means "not computed yet".
+ *
+ * exec_copyout_strings() reports it, and the init-death panic prints it, because the on-screen stage
+ * counter only shows the newest mark and would overwrite a one-off indicator.
+ */
+extern "C" int fuxi_sp_old_low = -1;
+
+extern "C" void
+fuxi_sp_note(int low)
+{
+	fuxi_sp_old_low = low;
+}
