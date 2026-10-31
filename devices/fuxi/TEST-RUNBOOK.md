@@ -32,6 +32,22 @@ pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image P
 
 ## 3. 每张镜像的判读
 
+### A5（推荐：一次启动回答两个问题）
+
+```powershell
+pwsh -NoProfile -File "C:\Users\Jason Wu\dsh\test-batch.ps1" -Image A5
+```
+
+它同时做两件事：
+
+1. 内核按"修复前"的算法算出旧 sp（`old_sp = 现在的 sp + 字符串区取整增量 + 指针区补齐增量`），并点亮标记：
+   - **数码管 56** → 旧代码本来会给出**未对齐**的 sp（SP 假设成立）
+   - **数码管 57** → 旧代码也会对齐（SP 不是死因）
+2. 然后不停止，继续启动已经对齐入口的探针（exit7：`getpid` + `exit(1)`）：
+   - 出现 `… (signal 0, exit status 1)` → **用户态跑通了**（exec + syscall + exit 全链路）
+   - 仍 SIGBUS → 同一张镜像的 panic 会带 `pc/far/sp` 与 `a_esr`，直接进 C2/T 的判读
+
+所以：**只刷 A5 一张就能同时定性"SP 假设"和"用户态是否可用"**；A3 只在你想单独看原始 sp 数值时才需要。
 ### A3（内核侧报告初始用户 SP 的低 4 位）
 
 这张**不需要用户态能跑**：内核在 `thread_setuserstack` 之前把算出来的 sp 打印出来并停下。

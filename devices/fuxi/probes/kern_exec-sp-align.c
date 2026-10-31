@@ -5660,6 +5660,8 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	size_t string_size;
 	size_t string_copy_size;   /* bytes actually copied (reserve may be rounded) */
 	size_t ptr_array_bytes;     /* bytes actually copied from the pointer buffer */
+	size_t fuxi_round_delta;   /* bytes added by rounding the strings area */
+	size_t fuxi_ptr_pad;       /* bytes added by padding the pointer area */
 
 	user_addr_t     string_area;    /* *argv[], *env[] */
 	user_addr_t     ptr_area;       /* argv[], env[], applev[] */
@@ -5727,6 +5729,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	/* fuxi: keep the argc slot 16-byte aligned (AArch64 ABI) by reserving a rounded
 	 * strings area. Moving sp down instead would leave argc at the wrong address. */
 	string_size = (string_size + 0xF) & ~(size_t)0xF;
+	fuxi_round_delta = string_size - string_copy_size;
 	stack -= string_size;
 	string_area = stack;
 
@@ -5742,6 +5745,7 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 	if (((imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 4) * ptr_size) % 16 != 0) {
 		ptr_area_size += 16 - (((imgp->ip_argc + imgp->ip_envc + imgp->ip_applec + 4) * ptr_size) % 16);
 	}
+	fuxi_ptr_pad = ptr_area_size - ptr_array_bytes;
 	stack -= ptr_area_size;
 	ptr_area = stack;
 
@@ -5768,6 +5772,19 @@ exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp)
 
 	/* Return the initial stack address: the location of argc */
 	*stackp = stack;
+
+	/*
+	 * fuxi: report whether the pre-fix arithmetic would have produced a misaligned sp.
+	 * The fix subtracts a rounded strings area and a padded pointer area, so the value the old code
+	 * would have produced is exactly this stack plus those two deltas.
+	 *   mark 56 = the old code would have handed userland an sp that is not 16-byte aligned
+	 *   mark 57 = the old code would have been aligned too (so the SIGBUS is not from sp)
+	 */
+	{
+		extern void fuxi_trace_mark(int index);
+		uint64_t old_sp = (uint64_t)stack + (uint64_t)fuxi_round_delta + (uint64_t)fuxi_ptr_pad;
+		fuxi_trace_mark(((old_sp & 0xF) != 0) ? 56 : 57);
+	}
 
 	/*
 	 * Copy out the entire strings area.

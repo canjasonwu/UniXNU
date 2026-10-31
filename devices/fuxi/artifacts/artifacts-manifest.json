@@ -24,6 +24,12 @@
     "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-SP-FIX\\boot.img"
   },
   {
+    "Letter": "A5",
+    "Bytes": 169619456,
+    "Sha256": "c823ed47441d5108e7448197f7b34434479440b8a3d794170fb3142418bdd483",
+    "Path": "C:\\Users\\Jason Wu\\dsh\\artifacts-COMBINED\\boot.img"
+  },
+  {
     "Letter": "B",
     "Bytes": 169619456,
     "Sha256": "e305ac6622458b7bdd3e2f0c9a372fb6d4ac597e0786ef186932a98188489eb5",
