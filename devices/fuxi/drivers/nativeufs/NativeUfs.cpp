@@ -971,6 +971,53 @@ static bool hostBringUp (const char **why)
   if (hostNop () != kIOReturnSuccess) {
     gHost.ready = false;
     *why = "NOP OUT";
+    /* The link itself is up (HCS.DP) and the UIC error counters are zero on this board, so the
+     * interesting state is the request path: UTRL base, run-stop bit, doorbell, and the OCS word the
+     * controller wrote into our UTRD. Report them instead of only "NOP OUT". */
+    {
+      uint32_t utrlba = read32 (gHost.hc, 0x50);
+      uint32_t utrlbau = read32 (gHost.hc, 0x54);
+      uint32_t utrldbr = read32 (gHost.hc, 0x58);
+      uint32_t utrlrsr = read32 (gHost.hc, 0x60);
+      uint32_t is = read32 (gHost.hc, 0x20);
+      uint32_t hcs = read32 (gHost.hc, 0x30);
+      uint32_t hce = read32 (gHost.hc, 0x34);
+      uint32_t ocs = 0xffffffffU;
+      uint32_t dw0 = 0xffffffffU, dw4 = 0xffffffffU;
+      if (gHost.virt != nullptr) {
+        volatile uint32_t *utrd = reinterpret_cast<volatile uint32_t *> (gHost.virt);
+        ocs = utrd[2];
+        dw0 = utrd[0];
+        dw4 = utrd[4];
+      }
+      uint8_t rsp[16] = {};
+      uint8_t ucd0[8] = {};
+      if (gHost.virt != nullptr) {
+        const uint8_t *response = gHost.virt + kUcdOffset + kRspOffset;
+        for (unsigned index = 0; index < 16; index++) {
+          rsp[index] = response[index];
+        }
+        const uint8_t *ucd = gHost.virt + kUcdOffset;
+        for (unsigned index = 0; index < 8; index++) {
+          ucd0[index] = ucd[index];
+        }
+      }
+      panic ("NATIVE_UFS NOP OUT state\n"
+             "utrlba=%08x utrlbau=%08x utrldbr=%08x utrlrsr=%08x\n"
+             "is=%08x hcs=%08x hce=%08x dma=%llx\n"
+             "utrd dw0=%08x ocs=%08x dw4=%08x\n"
+             "rsp=%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n"
+             "ucd=%02x %02x %02x %02x %02x %02x %02x %02x\n"
+             "smmu id1=%08x id2=%08x slot=%u cba2r=%08x",
+             utrlba, utrlbau, utrldbr, utrlrsr,
+             is, hcs, hce, (unsigned long long) gHost.phys,
+             dw0, ocs, dw4,
+             rsp[0], rsp[1], rsp[2], rsp[3], rsp[4], rsp[5], rsp[6], rsp[7],
+             rsp[8], rsp[9], rsp[10], rsp[11], rsp[12], rsp[13], rsp[14], rsp[15],
+             ucd0[0], ucd0[1], ucd0[2], ucd0[3], ucd0[4], ucd0[5], ucd0[6], ucd0[7],
+             gRootDiagnostic.smmuId1, gRootDiagnostic.smmuId2, gRootDiagnostic.smmuSlot,
+             gRootDiagnostic.cba2r);
+    }
     return false;
   }
   uint32_t power = 0;
