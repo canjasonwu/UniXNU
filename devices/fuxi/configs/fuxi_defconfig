@@ -12,9 +12,13 @@ CONFIG_XNU_SOURCE_CORECRYPTO14=y
 CONFIG_XNU_SOURCE_PTHREAD=y
 CONFIG_XNU_ARM_DT_PLATFORM=y
 CONFIG_XNU_ARMCPU=y
-# NativeUfs is off until the tree has IOKit/storage/IOBlockStorageDevice.h: this
-# xnu only ships a forwarding stub to a DriverKit header that does not exist here.
-CONFIG_XNU_NATIVE_UFS=n
+# NativeUfs on (2026-11-01). The IOKit storage header the driver needs is now vendored under
+# devices/fuxi/drivers/iostorage-inc and the driver source under devices/fuxi/drivers/nativeufs, so
+# scripts/build-nativeufs.py builds an archive the kernel link accepts: with this switch on the kernel
+# carries 37 UFS symbols (native_ufs_block_*, ufsReadWindow, ...). The driver still does nothing unless
+# a boot argument asks for it (fuxi-ufs-probe / fuxi-ufs-clock / fuxi-ufs-start), so the HFS root path
+# is unchanged.
+CONFIG_XNU_NATIVE_UFS=y
 CONFIG_XNU_NATIVE_AES=y
 # The virtio transports are storage drivers too: they include
 # <IOKit/storage/IOBlockStorageDevice.h>, which this xnu does not ship. Off until
