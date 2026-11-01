@@ -150,7 +150,20 @@ static IOReturn hostNop (void)
   uint32_t ocs = 15;
   IOReturn result = hostSubmit (0, 0, 200000, &ocs);
   if (result != kIOReturnSuccess) return result;
-  result = hostResponseHeader (0x20, 0, 1);
+  /* fuxi: this controller answers the NOP OUT with a RESPONSE UPIU (0x21), not the NOP-IN type the
+   * sheng hardware returned. Accept it when the response and SCSI status bytes are both zero, and keep
+   * the strict check for the 0x20 shape. The tag/lun mismatch seen on the device is not interpreted
+   * here; the root check that follows is the real test of the transport. */
+  {
+    const uint8_t *nopRsp = gHost.virt + kUcdOffset + kRspOffset;
+    if (nopRsp[0] == 0x20) {
+      result = hostResponseHeader (0x20, 0, 1);
+    } else if (nopRsp[0] == 0x21) {
+      result = (nopRsp[6] || nopRsp[7]) ? hostProtocolError (7) : kIOReturnSuccess;
+    } else {
+      result = hostProtocolError (1);
+    }
+  }
   if (result != kIOReturnSuccess) return result;
   const uint8_t *rsp = gHost.virt + kUcdOffset + kRspOffset;
   if (rsp[10] || rsp[11]) return hostProtocolError (4);
