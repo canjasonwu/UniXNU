@@ -48,3 +48,6 @@ __pycache__/
 *.key
 .env
 local.toml
+
+# Evidence logs kept on purpose (crash/command transcripts).
+!devices/fuxi/records/*.log

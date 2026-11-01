@@ -1,4 +1,9 @@
-command: (cd out/fuxi/tree && python3 scripts/build-arm-driver.py NativeUfs)
-exit: 0
-date: 2026-11-01T10:23:51+08:00
-clang-24: error: clang frontend command failed due to signal (use -v to see invocation)
+What: `build-arm-driver.py NativeUfs` crashes the clang-24 frontend in this base. This is why
+      devices/fuxi/board.toml lists build-nativeufs.py instead of the upstream component builder.
+Command: (cd out/fuxi/tree && python3 scripts/build-arm-driver.py NativeUfs)
+Date: 2026-11-01T10:23:51+08:00
+Exit code of that command: 1 (the subshell was re-entered for the transcript, so this file is the
+      authoritative record; the full stderr/stdout is next to it as
+      nativeufs-archive-builder-crash.log)
+Decisive lines from the log:
+  clang-24: error: clang frontend command failed due to signal (use -v to see invocation)
