@@ -16,7 +16,7 @@ from pathlib import Path
 REPO = Path(os.environ.get('UNIXNU_REPO', Path(__file__).resolve().parents[3]))
 ROOT = Path(os.environ.get('UNIXNU_TREE', REPO / 'out/fuxi/tree'))
 RECORD = ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/iokit/DEVELOPMENT/IOService.cpo.json'
-SOURCE_DIR = Path(os.environ.get('UNIXNU_NATIVEUFS_SOURCE', '/root/refs/NativeUFS-fuxi'))
+SOURCE_DIR = Path(os.environ.get('UNIXNU_NATIVEUFS_SOURCE', REPO / 'devices/fuxi/drivers/nativeufs'))
 SOURCE = SOURCE_DIR / 'NativeUfs.cpp'
 OUT = SOURCE_DIR / 'build'
 OUT.mkdir(parents=True, exist_ok=True)
@@ -46,7 +46,7 @@ while index < len(arguments):
         command.append(value)
     index += 1
 command[0:0] = []
-command = command + ['-I', str(SOURCE_DIR), '-I', '/root/refs/IOStorageFamily', '-I', '/root/refs/iostorage-inc', '-I', str(ROOT / '.cache/fakeroot/usr/include')]
+command = command + ['-I', str(SOURCE_DIR), '-I', str(REPO / 'devices/fuxi/drivers/iostorage-inc'), '-I', str(ROOT / '.cache/fakeroot/usr/include')]
 
 environment = {'PATH': '/opt/unixnu-linux/bin:/usr/local/bin:/usr/bin:/bin', 'HOME': '/root'}
 result = subprocess.run(command, cwd=record['directory'], capture_output=True,
