@@ -57,7 +57,7 @@
 |---|---|
 | **一次真机测试**（任意一张） | 只能继续做离线审计，无法推进真实故障 |
 | **IPSW 根目录**（launchd / dyld / dyld_shared_cache_arm64e） | 无法进入"真实 launchd"阶段 |
-| userdata 分区大小 | 可用 256 MiB 缺省，仅影响刷写对齐 |
+| userdata 分区 | LUN0 / sda32，`first=0x2f7840 last=0x3afc3fa`，**224.07 GiB**（start=24887808、size=469917144 个 512B 扇区，2026-10-21 真机 /sys 实测）；Android 的 /data 就是它，擦除 = 恢复出厂 |
 
 ## 7. 文档索引
 
