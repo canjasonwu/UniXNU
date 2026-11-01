@@ -267,10 +267,14 @@ chip_id = "207"                       # same SoC family as sheng; unverified her
 # screen recorded on 2026-10-25 reads "NO WINDOW 130000000 BIG RUN CE00000 @ C7E0000"
 # (kernel-autopilot.md:224): asking 0x130000000 (4.75 GiB, not 5.1) against a 0xCE00000 (206 MiB) run.
 # devices/fuxi/scripts/prepare-firmware.sh then rewrites the Kernel, PIL Reserved, Display Demura and
-# RSRV2 rows to Conventional; that block starts at 0x89800000 and the DBG/Demura region ends at the
-# "DBI Dump" hole at 0xA6100000 (0xA61 - 0x898 = 457 MiB). 0x1C000000 (448 MiB) plus the loader's
-# 0x4000 base misalignment therefore leaves about 8 MiB of margin - not 42 MiB, which is what an
-# earlier note claimed by taking the run as 490 MiB. XNU treats this value as the whole machine
+# RSRV2 rows to Conventional. MEASURED on 2026-11-01 with image artifacts-MEMPROBE (request
+# 0x130000000 on purpose): "NO WINDOW 130000000 BIG RUN 1C900000 @ 89800000", i.e. the largest
+# contiguous conventional run is 0x1C900000 = 457 MiB starting at 0x89800000, ending exactly at the
+# "DBI Dump" hole at 0xA6100000. The other free runs printed beside it are 0x4600000, 0x10000000,
+# 0x431B000, 0xCE00000, 0x6C00000 and 0xC20000. 0x1C000000 (448 MiB) plus the loader's 0x4000 base
+# misalignment therefore leaves about 9 MiB of margin. There is no run anywhere near the 4.75 GiB a
+# full iOS root would need, which is why the UFS root route (FUXI-FROM-SHENG.md) is the only way to a
+# real userland; raising this value alone cannot get there. XNU treats this value as the whole machine
 # (DarwinBoot sets boot_args MemorySize from it), which is why the HFS root route is capped here.
 # sheng asks 0x130000000 and can afford it because its firmware expands memory before DarwinBoot runs;
 # raising this number only works once the fuxi firmware hands over a run that big.

@@ -44,12 +44,15 @@ IPSW 的 OS/SystemOS 卷）+ 5.1 GiB 内存窗口**；我们现在是 **mockfs/H
 
 ## 3. 依赖顺序（不能跳步）
 
-### 3.1 内存窗口
-sheng：`owned_memory_size = 0x130000000`，由固件模块（`ShengBootMemoryDxe`）扩展内存后交给 DarwinBoot。
-fuxi：我们已有 `FuxiBootMemoryDxe`（prepare-firmware 会安装），但当前只做到 ~490 MiB 连续块。
-**下一步**：对照 sheng 的固件内存策略，把 FuxiBootMemoryDxe 的目标从"释放若干厂商预留"改成
-"尽可能扩大连续窗口"，并用 `NO WINDOW`/`BIG RUN` 诊断在真机测出能到的上限（先 1 GiB 还是能到 4 GiB）。
-这是唯一可能卡死的硬件相关未知项。
+### 3.1 内存窗口（已实测，2026-11-01）
+sheng：`owned_memory_size = 0x130000000`（4.75 GiB），由固件扩展内存后交给 DarwinBoot。
+fuxi：**实测上限 457 MiB**。镜像 `artifacts-MEMPROBE/boot.img`（刻意请求 `0x130000000`）在真机打出：
+`NO WINDOW 130000000 BIG RUN 1C900000 @ 89800000`，其余空闲块 `0x4600000 / 0x10000000 / 0x431B000 /
+0xCE00000 / 0x6C00000 / 0xC20000`（截图 sha256 `0ec00096e9efb39c0372c36a2a94603457ece8132ad631915bfb24f19b6434cb`）。
+457 MiB 恰好等于静态推算（`0x89800000` 到 `DBI Dump` 洞 `0xA6100000`），所以 448 MiB 的窗口余量约 9 MiB。
+**结论**：本机固件内存图里不存在接近 4.75 GiB 的连续块，靠调大 `owned_memory_size` 走不到完整根；
+`sheng 靠固件扩展内存` 在 fuxi 上需要先证明能释放/重排到那个量级（目前没有任何证据）。所以路线 C
+（NativeUfs 根，根不在 RAM 里）是唯一可行方向，B 路线只适用于当前 448 MiB 的 HFS 探针根。
 
 ### 3.2 PMGR（AMFI 的前置）
 fuxi board L237 的注释已经写明：`native-ufs-root=1` 需要 PMGR 集成，**否则 AMFI 以 "No PMGR?" panic**。
