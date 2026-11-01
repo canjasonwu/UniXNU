@@ -278,8 +278,17 @@ fuxi_ufs_clock_enable(void)
 	 * the duration of a bring-up probe. GDSCR (index 0) is never written. */
 	fuxi_ufs_clock_written = 0;
 	for (unsigned index = 1; index < 8; index++) {
-		if ((fuxi_ufs_clock_before[index] & 1U) == 0) {
-			fuxi_gcc_write(gcc, offset[index], fuxi_ufs_clock_before[index] | 1U);
+		uint32_t value = fuxi_ufs_clock_before[index];
+		if ((value & 0x80000000U) != 0) {
+			/* CLK_OFF (bit31) is a read-only status bit: it clears only when the branch actually
+			 * starts. Image B1 read ahb=0x80000003 - bit0 already 1, yet still gated - so setting
+			 * bit0 is not enough here. QCOM branch clocks latch the enable request on a 0 -> 1
+			 * transition, so toggle it and let the status bit answer. */
+			fuxi_gcc_write(gcc, offset[index], value & ~1U);
+			fuxi_gcc_write(gcc, offset[index], (value & ~1U) | 1U);
+			fuxi_ufs_clock_written++;
+		} else if ((value & 1U) == 0) {
+			fuxi_gcc_write(gcc, offset[index], value | 1U);
 			fuxi_ufs_clock_written++;
 		}
 	}
