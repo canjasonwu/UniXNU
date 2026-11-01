@@ -129,6 +129,12 @@ fuxi_read32(uintptr_t base, unsigned offset)
 	return *(volatile uint32_t *)(base + offset);
 }
 
+static void
+fuxi_write32(uintptr_t base, unsigned offset, uint32_t value)
+{
+	*(volatile uint32_t *)(base + offset) = value;
+}
+
 #define FUXI_GCC_BASE      0x00100000ULL
 #define FUXI_UFS_HC_BASE   0x01d84000ULL
 #define FUXI_UFS_HC_SIZE   0x3000ULL
@@ -183,6 +189,85 @@ fuxi_ufs_inspect(void)
 	    cap, ver, is, hcs, hce);
 }
 
+
+/*
+ * UFS link-state probe. The driver's transport test (NOP OUT) fails on fuxi and everything before it
+ * (SMMU stream bypass, request list, doorbell) is configured by the driver, so the remaining suspect
+ * is the UNIPRO link. This reads the UIC error counters, then attempts DME_LINKSTARTUP with the same
+ * sequence EDK2's UfsBlockIoPei uses, and reports HCS.DP / IS.ULSS / the error counters before and
+ * after. Gated by fuxi-ufs-uic so ordinary images never touch the controller.
+ */
+extern "C" void
+fuxi_ufs_uic(void)
+{
+	uint32_t enabled = 0;
+	if (!PE_parse_boot_argn("fuxi-ufs-uic", &enabled, sizeof(enabled)) || enabled == 0) {
+		return;
+	}
+	OSSharedPtr<IOMemoryMap> hcKeep;
+	uintptr_t hc = fuxi_map_phys(FUXI_UFS_HC_BASE, FUXI_UFS_HC_SIZE, hcKeep);
+	if (hc == 0) {
+		panic("fuxi-ufs-uic: HC map failed");
+	}
+
+	enum {
+		IS = 0x20, HCS = 0x30, HCE = 0x34,
+		UECPA = 0x38, UECDL = 0x3c, UECN = 0x40, UECT = 0x44, UECDME = 0x48,
+		UICCMD = 0x90, ARG1 = 0x94, ARG2 = 0x98, ARG3 = 0x9c,
+	};
+	uint32_t hce0 = fuxi_read32(hc, HCE);
+	uint32_t is0 = fuxi_read32(hc, IS), hcs0 = fuxi_read32(hc, HCS);
+	uint32_t uecpa = fuxi_read32(hc, UECPA), uecdl = fuxi_read32(hc, UECDL);
+	uint32_t uecn = fuxi_read32(hc, UECN), uect = fuxi_read32(hc, UECT);
+	uint32_t uecdme = fuxi_read32(hc, UECDME);
+
+	auto uic = [hc](uint32_t opcode, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t *arg2Out) -> uint32_t {
+		fuxi_write32(hc, IS, fuxi_read32(hc, IS));
+		fuxi_write32(hc, ARG1, a1);
+		fuxi_write32(hc, ARG2, a2);
+		fuxi_write32(hc, ARG3, a3);
+		for (unsigned spin = 0; spin < 100000; spin++) {
+			if (fuxi_read32(hc, HCS) & 0x8U) {
+				break;
+			}
+			IODelay(1);
+		}
+		fuxi_write32(hc, UICCMD, opcode);
+		bool done = false;
+		for (unsigned spin = 0; spin < 100000; spin++) {
+			if (fuxi_read32(hc, IS) & 0x400U) {
+				done = true;
+				break;
+			}
+			IODelay(1);
+		}
+		uint32_t arg2 = fuxi_read32(hc, ARG2);
+		if (arg2Out != nullptr) {
+			*arg2Out = arg2;
+		}
+		return done ? (arg2 & 0xffU) : 0xffffU;
+	};
+
+	uint32_t arg2 = 0;
+	uint32_t startup = uic(0x16U, 0, 0, 0, &arg2);
+	uint32_t is1 = fuxi_read32(hc, IS);
+	uint32_t hcs1 = fuxi_read32(hc, HCS);
+	uint32_t uecpa1 = fuxi_read32(hc, UECPA), uecdl1 = fuxi_read32(hc, UECDL);
+
+	panic("fuxi-ufs-uic: hce=%08x\n"
+	    "before is=%08x hcs=%08x DP=%u UCRDY=%u\n"
+	    "before uec pa=%08x dl=%08x n=%08x t=%08x dme=%08x\n"
+	    "linkstartup result=%x arg2=%08x\n"
+	    "after is=%08x ULSS=%u UCCS=%u hcs=%08x DP=%u\n"
+	    "after uec pa=%08x dl=%08x",
+	    hce0,
+	    is0, hcs0, (unsigned)(hcs0 & 1U), (unsigned)((hcs0 >> 3) & 1U),
+	    uecpa, uecdl, uecn, uect, uecdme,
+	    startup, arg2,
+	    is1, (unsigned)((is1 >> 8) & 1U), (unsigned)((is1 >> 10) & 1U),
+	    hcs1, (unsigned)(hcs1 & 1U),
+	    uecpa1, uecdl1);
+}
 
 /* Stage counter for bring-up: one white square per stage, so a single photograph shows how
  * far the kernel got before it hung (there is no serial console). Row is below the
@@ -303,8 +388,13 @@ fuxi_ufs_clock_enable(void)
 extern "C" void
 fuxi_ufs_clock(void)
 {
-	uint32_t enabled = 0;
+	uint32_t enabled = 0, startArg = 0;
 	if (!PE_parse_boot_argn("fuxi-ufs-clock", &enabled, sizeof(enabled)) || enabled == 0) {
+		return;
+	}
+	/* When the start probe also runs it owns the clock work and reports it; two probes that both
+	 * panic let the clock one pre-empt the start result (images B5/B6). */
+	if (PE_parse_boot_argn("fuxi-ufs-start", &startArg, sizeof(startArg)) && startArg != 0) {
 		return;
 	}
 	if (!fuxi_ufs_clock_enable()) {
@@ -347,6 +437,7 @@ fuxi_ufs_start(void)
 extern "C" void fuxi_mdev_test(void);
 extern "C" void fuxi_ufs_read(void);
 extern "C" int fuxi_rootdev_override(int current);
+extern "C" void fuxi_ufs_uic(void);
 extern "C" void fuxi_ufs_clock(void);
 extern "C" void fuxi_ufs_start(void);
 
@@ -354,6 +445,7 @@ extern "C" void
 sheng_pmgr_late_probe(void)
 {
 	sheng_pmgr_publish_nub();
+	fuxi_ufs_uic();
 	fuxi_ufs_inspect();
 	fuxi_ufs_clock();
 	fuxi_mdev_test();
