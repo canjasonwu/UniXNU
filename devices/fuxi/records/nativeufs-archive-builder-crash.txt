@@ -1,0 +1,4 @@
+command: (cd out/fuxi/tree && python3 scripts/build-arm-driver.py NativeUfs)
+exit: 0
+date: 2026-11-01T10:23:51+08:00
+clang-24: error: clang frontend command failed due to signal (use -v to see invocation)

@@ -6,23 +6,25 @@ compile against this tree's IOKit headers and ABI, and what does it still need? 
 flags come from a real C++ compile record of our kernel build, so include paths and
 deployment target match exactly.
 """
+import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path('/root/UniXNU/out/fuxi/tree')
+ROOT = Path(os.environ.get('UNIXNU_TREE', '/root/UniXNU/out/fuxi/tree'))
 RECORD = ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/iokit/DEVELOPMENT/IOService.cpo.json'
-SOURCE_DIR = Path('/root/refs/NativeUFS-fuxi')
+SOURCE_DIR = Path(os.environ.get('UNIXNU_NATIVEUFS_SOURCE', '/root/refs/NativeUFS-fuxi'))
 SOURCE = SOURCE_DIR / 'NativeUfs.cpp'
-OUT = Path('/root/refs/NativeUFS-fuxi/build')
+OUT = SOURCE_DIR / 'build'
 OUT.mkdir(parents=True, exist_ok=True)
 destination = OUT / 'NativeUfs.o'
 
 if not RECORD.is_file():
     raise SystemExit('missing compile record: %s' % RECORD)
 if not SOURCE.is_file():
-    raise SystemExit('missing source: %s' % SOURCE)
+    raise SystemExit('missing source: %s (set UNIXNU_NATIVEUFS_SOURCE to the reference checkout)' % SOURCE)
 
 record = json.loads(RECORD.read_text().strip().rstrip(','))
 arguments = record['arguments']
@@ -79,17 +81,19 @@ print('compiled hook:', hook_object, hook_object.stat().st_size, 'bytes')
 
 # The kernel link expects the archive under the build tree (build-xnu-4k-baseline.sh:
 # UFS_ARCHIVE=$ROOT/build/native-ufs/libNativeUfs.a), not next to the reference sources.
-archive_dir = Path('/root/UniXNU/build/native-ufs')
+archive_dir = Path(os.environ.get('UNIXNU_REPO', '/root/UniXNU')) / 'build/native-ufs'
 archive_dir.mkdir(parents=True, exist_ok=True)
 archive = archive_dir / 'libNativeUfs.a'
 archive.unlink(missing_ok=True)
 subprocess.run(['/opt/unixnu-linux/CommandLineTools/usr/bin/ar', 'rcs', str(archive),
                 str(destination), str(stub_object), str(hook_object)], check=True)
-print('archive:', archive, archive.stat().st_size, 'bytes')
+print('archive:', archive, archive.stat().st_size, 'bytes',
+      'sha256', hashlib.sha256(archive.read_bytes()).hexdigest())
 
 # Mirror it where the kernel script looks for it ($ROOT/build/native-ufs).
 tree_dir = ROOT / 'build/native-ufs'
 tree_dir.mkdir(parents=True, exist_ok=True)
 tree_archive = tree_dir / 'libNativeUfs.a'
 tree_archive.write_bytes(archive.read_bytes())
-print('tree archive:', tree_archive, tree_archive.stat().st_size, 'bytes')
+print('tree archive:', tree_archive, tree_archive.stat().st_size, 'bytes',
+      'sha256', hashlib.sha256(tree_archive.read_bytes()).hexdigest())

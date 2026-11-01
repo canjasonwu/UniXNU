@@ -14,6 +14,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 cd "$REPO"
 
+# Board gate. A board.toml copied from a newer UniXNU base can carry sections this base never reads,
+# and the TOML parser accepts them silently; tools/check-board-keys.py knows which keys are read.
+python3 "$REPO/tools/check-board-keys.py" "$REPO/devices/fuxi/board.toml"
+
 CHIP_ID=0x1234567890abcdef
 DO_KERNEL=auto
 DO_FIRMWARE=auto

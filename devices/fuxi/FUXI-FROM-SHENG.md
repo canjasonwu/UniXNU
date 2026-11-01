@@ -16,7 +16,7 @@ IPSW 的 OS/SystemOS 卷）+ 5.1 GiB 内存窗口**；我们现在是 **mockfs/H
 
 | 项 | 证据 |
 |---|---|
-| board.toml 的 schema（board/ipsw/userdata/kernel/prelink/firmware/payload/adt） | `devices/fuxi/board.toml` 的 section 列表与 sheng 一致 |
+| board.toml 的**字段族**（board/ipsw/userdata/kernel/prelink/firmware/payload/adt） | 我们的 section 列表与 sheng 相同，但**底座版本不同**：本仓是 v1（只读七个顶层段），sheng 是 v2（另有 components/device_tree/os_overrides/payload.install 等，本仓解析后静默忽略，见 §2.5） |
 | IPSW 目标（iPad7,1 17.7.11 21H461）与 sha256 | fuxi board L19-43，与 sheng 相同 URL/product/version |
 | prelink 保留 Apple kexts（apfs、IOSStorageFamily、AMFI、sandbox、AppleImage4…31 个 root） | fuxi board `[kernel.prelink].roots` |
 | `-apfs_shared_datavolume` kernel arg | fuxi board kernel_args |
@@ -85,10 +85,12 @@ LBA 用 fuxi 实测值（0x2f7840–0x3afc3fa）。
 1. `git clone https://github.com/UniXNU/UniXNU-sheng /root/refs/upstream/UniXNU-sheng`（已做）
    并 `git submodule update --init drivers/ShengUfs`（已做）；对照 `drivers/ShengUfs/*.h` 与我们的
    `platform-power` UFS 代码，列出缺失 API。
-2. 把 `[payload.install]`、`persistent_data`、`[os_overrides]` 三段从 sheng 裁成 fuxi 的 17.7.11 版本。
+2. **不要**把 `[payload.install]`、`persistent_data`、`[os_overrides]` 直接粘进 fuxi board：本仓底座不读这些段
+   （TOML 会接受、镜像行为不变，等于假进度）。已改为注释记录 + `tools/check-board-keys.py` 拦截（由
+   `devices/fuxi/scripts/local-build.sh` 调用）；等底座升到 v2 再一起移植。
 3. 在 `board.toml` 里新增 `[kernel].archives` 的 `build-arm-driver.py NativeUfs` 项（先不启用根切换）。
 4. 用 `unixnu status --device devices/fuxi --json` 确认新增字段被解析（棋盘式校验，避免 TOML 静默忽略）。
-5. 在 CI 上加一个 `board.toml` 结构校验 job（本仓已有 `tools/ci-preflight.py` 可扩展）。
+5. `board.toml` 的结构校验已落地为 `tools/check-board-keys.py`（每次 `local-build.sh` 都会跑）;若要在 CI 里也跑，注意 `tools/ci-preflight.py` 是 CI 派发工具、不是结构校验器，需要单独加一个 step。
 
 ## 6. 风险与回退
 

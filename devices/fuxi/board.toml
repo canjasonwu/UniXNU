@@ -75,6 +75,10 @@ archives = [
   # Deliberately absent, each needs a fuxi implementation first (the configs that
   # would use them are off in fuxi_defconfig):
   "build-fuxi-platform-power.py",
+  # NativeUfs, built by our own script. "build-arm-driver.py NativeUfs" crashes clang-24 in this base
+  # (frontend signal while parsing the IOKit storage shim), while devices/fuxi/scripts/build-nativeufs.py
+  # compiles the same driver against our kernel's recorded flags and produces build/native-ufs/libNativeUfs.a.
+  "build-nativeufs.py",
   #   build-native-adreno-kits.py   (CONFIG_XNU_NATIVE_ADRENO)
   #   build-arm-driver.py NativeAdreno / build-native-adreno-accelerator.py
   #   build-native-legacy-display.py (CONFIG_XNU_NATIVE_LEGACY_DISPLAY)
@@ -241,23 +245,35 @@ kernel_args = [
 #   offline-* (the whole offline bring-up ladder), boot-ui-focus*,
 #   sheng-disable-jobs, sheng-data-persist
 
+# SCHEMA GAP (verified 2026-11-01). The sheng device repository is on a newer UniXNU schema (v2) whose
+# board.toml carries [payload.install], [payload.adt].persistent_data and [os_overrides.<os-profile>].
+# This base reads only these top-level sections: board, ipsw, userdata, kernel, firmware, payload,
+# bootimg (grep of scripts/unixnu/*.py). Anything else is accepted by the TOML parser and then ignored,
+# which is worse than a rejection, so the sheng blocks are recorded here as a comment and enforced by
+# tools/check-board-keys.py rather than pasted in as if they worked. Port them together with the base
+# upgrade, not before:
+#   [payload.install]                install menu; needs the data-reset kernel argument implemented in
+#                                    fuxi platform power (sheng uses sheng-data-reset=1/2)
+#   [payload.adt].persistent_data    needs ADT support in scripts/make-fuxi-adt.py
+#   [os_overrides."ipados-17.7.11-21H461"]
+#                                    per-OS components/archives/kernel_args override
+
 [payload.adt]
 tool = "scripts/make-fuxi-adt.py"     # ported from sheng: the SM8550 addresses are the platform's, the identity strings are fuxi's
 chip_id = "207"                       # same SoC family as sheng; unverified here
-# 4.75 GiB, kept from sheng on purpose. This is how much DRAM the owner image is
-# told it has; a window smaller than the real 11.68 GiB is the safe choice during
-# bring-up. Raise it only after the kernel maps the high ranges without faults.
-# 256 MiB, the smallest window DarwinBoot accepts. It is not a statement about how
-# much DRAM exists: AllocateWindow() needs one *contiguous* conventional run of this
-# size, and it reserves exactly this much, so anything larger than the largest free
-# run fails with Out of Resources (measured: 5 GiB asked, 206 MiB available).
-# 254 MiB: the loader aligns the window base to 2 MiB and then adds the kernel's own
-# 2 MiB misalignment, so a request exactly equal to the free run is rejected by
-# 0x4000 bytes. The floor below is patched to match.
-# 448 MiB. The four vendor reservations between 0x89800000 and 0xA7000000 are
-# released to conventional memory below, which makes one 490 MiB run; 448 MiB plus
-# the 0x4000 alignment offset still fits with ~42 MiB to spare. XNU treats this as
-# the whole machine, so it is the number to raise as the span grows.
+# MEASURED, not assumed. DarwinBoot's AllocateWindow() needs one *contiguous* conventional run and
+# reserves exactly the requested size (drivers/DarwinBoot/.../DarwinBoot.c AllocateWindow,
+# RunEnd/FREE diagnostics), so a request bigger than that run fails with Out of Resources. The device
+# screen recorded on 2026-10-25 reads "NO WINDOW 130000000 BIG RUN CE00000 @ C7E0000"
+# (kernel-autopilot.md:224): asking 0x130000000 (4.75 GiB, not 5.1) against a 0xCE00000 (206 MiB) run.
+# devices/fuxi/scripts/prepare-firmware.sh then rewrites the Kernel, PIL Reserved, Display Demura and
+# RSRV2 rows to Conventional; that block starts at 0x89800000 and the DBG/Demura region ends at the
+# "DBI Dump" hole at 0xA6100000 (0xA61 - 0x898 = 457 MiB). 0x1C000000 (448 MiB) plus the loader's
+# 0x4000 base misalignment therefore leaves about 8 MiB of margin - not 42 MiB, which is what an
+# earlier note claimed by taking the run as 490 MiB. XNU treats this value as the whole machine
+# (DarwinBoot sets boot_args MemorySize from it), which is why the HFS root route is capped here.
+# sheng asks 0x130000000 and can afford it because its firmware expands memory before DarwinBoot runs;
+# raising this number only works once the fuxi firmware hands over a run that big.
 owned_memory_size = "0x1C000000"
 root_match_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"   # from the IPSW, not the board
 cpu_regs = "0,0x100,0x200,0x300,0x400,0x500,0x600,0x700"          # 8 cores
