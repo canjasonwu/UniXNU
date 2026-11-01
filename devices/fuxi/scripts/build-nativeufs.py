@@ -87,6 +87,10 @@ archive = archive_dir / 'libNativeUfs.a'
 archive.unlink(missing_ok=True)
 subprocess.run(['/opt/unixnu-linux/CommandLineTools/usr/bin/ar', 'rcs', str(archive),
                 str(destination), str(stub_object), str(hook_object)], check=True)
+print('source:', SOURCE, SOURCE.stat().st_size, 'bytes',
+      'sha256', hashlib.sha256(SOURCE.read_bytes()).hexdigest())
+# The archive hash is NOT a reproducible-build certificate: cctools ar stores each member's mtime,
+# so two builds of identical sources hash differently. Compare the source hash above instead.
 print('archive:', archive, archive.stat().st_size, 'bytes',
       'sha256', hashlib.sha256(archive.read_bytes()).hexdigest())
 
