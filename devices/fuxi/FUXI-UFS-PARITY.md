@@ -49,7 +49,7 @@
 | 数据持久化 | `sheng-data-persist=2`、`persistent_data=true` | 无 | userdata 语义 |
 | 安装/重置菜单 | `[payload.install]` + `sheng-data-reset` | 无（base 不支持该 schema） | 数据卷重置 |
 | `packed_data_ramdisk` | `true` | `false` | payload 数据盘形态 |
-| `owned_memory_size` | `0x130000000`（5.1 GiB） | `0x1C000000`（448 MiB） | 能装下的根内容 |
+| `owned_memory_size` | `0x130000000`（4.75 GiB；5.1 是十进制 GB） | `0x1C000000`（448 MiB） | 能装下的根内容 |
 | UFS 供电/时钟 | `ShengPlatformPower` | 我们已有 `fuxi_ufs_inspect`/`fuxi_ufs_clock_enable`（`fuxi-ufs-probe`/`fuxi-ufs-clock` 门槛） | 需真机验证 GCC/GDSC 值 |
 
 ## 3. 我们缺的 API（按"必须/可选"分）
@@ -70,7 +70,7 @@
 
 ## 4. 建议的推进顺序（与 `FUXI-FROM-SHENG.md` 一致，这里只列 UFS 侧）
 
-1. **升级子模块** → `99d8bcd`，把 `af785c1` rebase 上去（离线，先做）
+1. **cherry-pick** sheng `99d8bcd` 的 host-lock / manifest-v2 改动到 NativeUfs 仓库（不是"升级子模块"，见 §1），离线先做
 2. 用一次完整 `unixnu build kernel` 验证 `build-nativeufs.py` 归档 + 内核 link（离线；本次已启动）
 3. 真机：`fuxi-ufs-probe=1` / `fuxi-ufs-clock=1` 确认 GCC/GDSC 与时钟分支（已有镜像 W/X 可复用）
 4. 真机：`native-ufs-root=1` + PMGR 对照（只需 HFS 根镜像加参数，不动 userdata）
@@ -78,6 +78,6 @@
 
 ## 5. 回退
 
-- 子模块升级是独立提交，`git -C drivers/NativeUfs checkout af785c1` 即可回退
+- 子模块指针不变；回退只需丢弃那两个 cherry-pick
 - 归档项新增不影响未启用 `CONFIG_XNU_NATIVE_UFS` 的镜像（归档只产出 .a，不参与 link）
 - 根策略切换仍只改 board.toml + defconfig 一位，随时可回退到 mockfs/HFS 路线

@@ -9,8 +9,8 @@
 
 [board]
 name = "fuxi"
-soc = "SM8550"
-description = "Xiaomi 13"
+# soc = "SM8550"   # documentation only: the base never reads this key
+# description = "Xiaomi 13"   # documentation only: the base never reads this key
 kit = "fuxi"
 
 # Device independent: this identifies the target OS image, not the hardware.
@@ -51,7 +51,7 @@ windows = [
 ]
 
 [kernel]
-defconfig = "fuxi_defconfig"
+# defconfig = "fuxi_defconfig"   # documentation only: the base never reads this key
 # Archive builders of the kernel step, in order. Only builders that exist in the
 # UniXNU base repository are active: a missing script aborts the step. The five
 # builders that live only in the sheng device repository are listed as TODOs below

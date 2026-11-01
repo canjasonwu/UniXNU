@@ -33,7 +33,7 @@ IPSW 的 OS/SystemOS 卷）+ 5.1 GiB 内存窗口**；我们现在是 **mockfs/H
 | 1 | `[payload.adt].owned_memory_size` | `0x130000000`（5.1 GiB） | `0x1C000000`（448 MiB） | 提到 sheng 量级；需要固件内存扩展（§3.1） |
 | 2 | `[payload.adt].packed_data_ramdisk` | `true` | `false` | 改为 true（与 userdata 根配套） |
 | 3 | `[payload].kernel_args` 中的根策略 | `native-source-storage=1`、`native-ufs-root=1`、`offline-apfs-load=1`、`-apfs_shared_datavolume`、`sheng-pmgr=2` | 只有 `-apfs_shared_datavolume` + `rd=md0`（mockfs） | 去掉 `rd=md0`，加 `native-ufs-root=1` + `offline-apfs-load=1`；PMGR 开关见 §3.2 |
-| 4 | `[kernel].archives` | 含 `component:ShengUfs`、`VirtioMmioBlock`、`RamBlock`、`build-sheng-platform-power.py` 等 19 项 | 9 项，含 `build-mockfs-fixture.py`、`build-fuxi-platform-power.py`，**无 UFS 归档** | 增加 `build-arm-driver.py NativeUfs`（或 fuxi 自己的 UFS 驱动归档）；移除 mockfs-fixture 仅在切根之后 |
+| 4 | `[kernel].archives` | 含 `component:ShengUfs`、`VirtioMmioBlock`、`RamBlock`、`build-sheng-platform-power.py` 等 19 项 | 9 项，含 `build-mockfs-fixture.py`、`build-fuxi-platform-power.py`，**无 UFS 归档** | 增加 `build-nativeufs.py`（上游 `build-arm-driver.py NativeUfs` 在本底座会让 clang-24 前端崩溃，记录见 `devices/fuxi/records/nativeufs-archive-builder-crash.txt`）（或 fuxi 自己的 UFS 驱动归档）；移除 mockfs-fixture 仅在切根之后 |
 | 5 | `configs/fuxi_defconfig` | `CONFIG_XNU_NATIVE_UFS=y`、`CONFIG_XNU_SHENG_PMGR=y` | `CONFIG_XNU_NATIVE_UFS=n`（注释：缺 IOBlockStorageDevice 头）、`SHENG_PMGR=y` | 先解决头文件问题（本仓已有 `IOStorageStubs.cpp`），再置 y |
 | 6 | `[payload].size_mib` | 176–208 | 160 | 切换后按内核+ADT 实际大小调（sheng 208 对应 kernels+kexts 更大） |
 | 7 | `[payload].install` / `persistent_data` | 有 install 菜单、`persistent_data = true` | 无 | 迁移时补（数据卷可持久化与重置语义） |
@@ -88,7 +88,7 @@ LBA 用 fuxi 实测值（0x2f7840–0x3afc3fa）。
 2. **不要**把 `[payload.install]`、`persistent_data`、`[os_overrides]` 直接粘进 fuxi board：本仓底座不读这些段
    （TOML 会接受、镜像行为不变，等于假进度）。已改为注释记录 + `tools/check-board-keys.py` 拦截（由
    `devices/fuxi/scripts/local-build.sh` 调用）；等底座升到 v2 再一起移植。
-3. 在 `board.toml` 里新增 `[kernel].archives` 的 `build-arm-driver.py NativeUfs` 项（先不启用根切换）。
+3. 在 `board.toml` 里新增 `[kernel].archives` 的 `build-nativeufs.py`（上游 `build-arm-driver.py NativeUfs` 在本底座会让 clang-24 前端崩溃，记录见 `devices/fuxi/records/nativeufs-archive-builder-crash.txt`） 项（先不启用根切换）。
 4. 用 `unixnu status --device devices/fuxi --json` 确认新增字段被解析（棋盘式校验，避免 TOML 静默忽略）。
 5. `board.toml` 的结构校验已落地为 `tools/check-board-keys.py`（每次 `local-build.sh` 都会跑）;若要在 CI 里也跑，注意 `tools/ci-preflight.py` 是 CI 派发工具、不是结构校验器，需要单独加一个 step。
 

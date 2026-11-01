@@ -89,7 +89,7 @@ def build_archives(ctx, env, required=True):
             raise Error(f'[kernel] archives: {script} missing')
         log(f'kernel: archive {index}/{len(entries)}: {entry}')
         try:
-            run(['python3', script, *parts[1:]], cwd=ctx.tree, env=env, log_file=ctx.logs / f'archive-{index:02d}-{Path(parts[0]).stem}.log')
+            run(['python3', script, *parts[1:]], cwd=ctx.tree, env=dict(env, UNIXNU_TREE=str(ctx.tree), UNIXNU_REPO=str(ctx.tree.parents[2])), log_file=ctx.logs / f'archive-{index:02d}-{Path(parts[0]).stem}.log')
         except Error:
             if required:
                 raise
