@@ -160,26 +160,136 @@ def verify_image(path):
     return {"image_bytes": image_bytes, "windows": windows}
 
 
+def build_stream(window_files, out_path, image_bytes=None, partition_bytes=None):
+    """Build an image from (name, path) pairs, streaming each window instead of buffering it."""
+    if not window_files:
+        raise LayoutError("at least one window is required")
+    if len(window_files) > WINDOW_MAX:
+        raise LayoutError(f"at most {WINDOW_MAX} windows are supported")
+    layout, names, cursor = [], set(), BLOCK
+    for name, path in window_files:
+        encoded = name.encode("ascii")
+        if not encoded or len(encoded) >= NAME_MAX or any(b < 0x20 or b > 0x7E for b in encoded):
+            raise LayoutError(f"window name must be 1..{NAME_MAX - 1} printable bytes: {name!r}")
+        if encoded in names:
+            raise LayoutError(f"duplicate window name {name!r}")
+        names.add(encoded)
+        size = Path(path).stat().st_size
+        if not size or size % 512:
+            raise LayoutError(f"window {name!r}: size {size} is not a non-zero multiple of 512")
+        layout.append({"name": name, "encoded": encoded, "path": Path(path), "size": size,
+                       "offset": cursor, "size_padded": (size + BLOCK - 1) // BLOCK * BLOCK})
+        cursor = (cursor + size + BLOCK - 1) // BLOCK * BLOCK
+    total = (cursor + BLOCK - 1) // BLOCK * BLOCK
+    if image_bytes is not None:
+        if image_bytes < total or image_bytes % BLOCK:
+            raise LayoutError("image_bytes must be a 4096 multiple and hold every window")
+        total = image_bytes
+    if partition_bytes is not None and total > partition_bytes:
+        raise LayoutError("image exceeds the userdata partition")
+    manifest = bytearray(BLOCK)
+    struct.pack_into("<II", manifest, 0, 0x474e4853, 0x544f4f52)
+    struct.pack_into("<IIQ", manifest, 8, 1, len(layout), total)
+    with Path(out_path).open("wb") as out:
+        out.truncate(total)
+        for index, window in enumerate(layout):
+            base = 24 + WINDOW_ENTRY * index
+            manifest[base:base + len(window["encoded"]) + 1] = window["encoded"] + b"\0"
+            struct.pack_into("<QQII", manifest, base + 32, window["offset"], window["size"], 512, 1)
+            digest = hashlib.sha256()
+            out.seek(window["offset"])
+            remaining = window["size"]
+            with window["path"].open("rb") as source:
+                while remaining:
+                    chunk = source.read(min(8 << 20, remaining))
+                    if not chunk:
+                        raise LayoutError(f"window {window['name']!r} is shorter than its size")
+                    digest.update(chunk)
+                    out.write(chunk)
+                    remaining -= len(chunk)
+            manifest[base + 56:base + 88] = digest.digest()
+            window["sha256"] = digest.digest()
+        manifest[4064:4096] = hashlib.sha256(bytes(manifest[:4064])).digest()
+        out.seek(0)
+        out.write(manifest)
+    return layout, total
+
+
+def verify_image_stream(path):
+    """Verify a large image with bounded memory: parse the manifest, then re-hash each window by seek."""
+    path = Path(path)
+    size = path.stat().st_size
+    if size < BLOCK or size % BLOCK:
+        raise LayoutError(f"image size {size} is not a positive multiple of {BLOCK}")
+    with path.open("rb") as handle:
+        manifest = handle.read(BLOCK)
+        image_bytes, = struct.unpack_from("<Q", manifest, 16)
+        magic0, magic1 = struct.unpack_from("<II", manifest, 0)
+        if (magic0, magic1) != (0x474e4853, 0x544f4f52):
+            raise LayoutError("bad manifest magic (expected SHNGROOT)")
+        version, count = struct.unpack_from("<II", manifest, 8)
+        if version != 1 or not 1 <= count <= WINDOW_MAX:
+            raise LayoutError(f"manifest version {version} / window count {count} invalid")
+        if image_bytes < BLOCK or image_bytes % BLOCK or image_bytes > size:
+            raise LayoutError(f"image bytes {image_bytes} inconsistent with file size {size}")
+        if hashlib.sha256(manifest[:4064]).digest() != manifest[4064:4096]:
+            raise LayoutError("manifest sha256 mismatch")
+        windows = []
+        for index in range(count):
+            base = 24 + WINDOW_ENTRY * index
+            name = manifest[base:base + NAME_MAX].split(b"\0", 1)[0]
+            offset, wsize, block_size, flag = struct.unpack_from("<QQII", manifest, base + 32)
+            if block_size != 512 or flag != 1:
+                raise LayoutError(f"window {name!r}: block size/flag {block_size}/{flag} != 512/1")
+            if offset % BLOCK or offset < BLOCK or wsize % 512 or not wsize or offset >= image_bytes or wsize > image_bytes - offset:
+                raise LayoutError(f"window {name!r}: bad offset/size {offset}/{wsize}")
+            handle.seek(offset)
+            digest = hashlib.sha256()
+            remaining = wsize
+            while remaining:
+                chunk = handle.read(min(8 << 20, remaining))
+                if not chunk:
+                    raise LayoutError(f"window {name!r} is shorter than its declared size")
+                digest.update(chunk)
+                remaining -= len(chunk)
+            if digest.digest() != manifest[base + 56:base + 88]:
+                raise LayoutError(f"window {name!r}: sha256 mismatch")
+            windows.append({"name": name.decode(), "offset": offset, "size": wsize})
+        return {"image_bytes": image_bytes, "windows": windows}
+
+
 def command_build(args):
     specs = []
-    for entry in args.window or []:
+    for entry in (args.window or []):
         name, _, path = entry.partition("=")
         if not name or not path:
             raise LayoutError(f"--window must be NAME=PATH: {entry!r}")
         specs.append((name, path))
+    for entry in getattr(args, "window_file", None) or []:
+        name, _, path = entry.partition("=")
+        if not name or not path:
+            raise LayoutError(f"--window-file must be NAME=PATH: {entry!r}")
+        specs.append((name, path))
+    if getattr(args, "window_file", None):
+        layout, total = build_stream(specs, args.out, args.image_bytes)
+        print(f"built {args.out}: {total} bytes, {len(layout)} window(s) (streamed)")
+        for window in layout:
+            print(f"  {window['name']:<12} offset {window['offset']:>12}  size {window['size']:>12}  "
+                  f"sha256 {window['sha256'].hex()[:16]}")
+        return 0
     windows, total = build_image(specs, args.out, args.image_bytes)
     print(f"built {args.out}: {total} bytes, {len(windows)} window(s)")
     for window in windows:
-        print(f"  {window['name']:<12} offset {window['offset']:>10}  size {window['size']:>10}  "
+        print(f"  {window['name']:<12} offset {window['offset']:>12}  size {window['size']:>12}  "
               f"sha256 {window['sha256'].hex()[:16]}")
     return 0
 
 
 def command_verify(args):
-    info = verify_image(args.image)
+    info = verify_image_stream(args.image)
     print(f"ok {args.image}: image bytes {info['image_bytes']}, {len(info['windows'])} window(s)")
     for window in info["windows"]:
-        print(f"  {window['name']:<12} offset {window['offset']:>10}  size {window['size']:>10}")
+        print(f"  {window['name']:<12} offset {window['offset']:>12}  size {window['size']:>12}")
     return 0
 
 
@@ -275,6 +385,8 @@ def main(argv):
     build = sub.add_parser("build", help="assemble a userdata root image")
     build.add_argument("--out", required=True)
     build.add_argument("--window", action="append", metavar="NAME=PATH")
+    build.add_argument("--window-file", action="append", metavar="NAME=PATH",
+                       help="stream the window from a file instead of buffering it (multi-GiB windows)")
     build.add_argument("--image-bytes", type=int, default=None,
                        help="override the recorded image byte count (defaults to the assembled size)")
     build.set_defaults(func=command_build)
